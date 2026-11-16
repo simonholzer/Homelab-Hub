@@ -265,9 +265,46 @@ function renderStats() {
   }
 }
 
+let statsClosed = {}; // caption -> true (closed) / false (open); missing = closed on a phone, open otherwise
+try {
+  const saved = JSON.parse(localStorage.getItem('hub-stats-closed') ?? '{}');
+  if (saved && typeof saved === 'object' && !Array.isArray(saved)) statsClosed = saved;
+} catch {
+  // storage blocked or damaged: automatic
+}
+
 /** One machine's tiles, under its caption. */
 function appendStats(s, caption, title = '') {
-  if (caption) els.stats.append(h('div', { class: 'stats-title', title, text: caption }));
+  if (caption) {
+    // The caption opens and closes this machine's tiles. Closed, one line sums them up. On a phone they
+    // start closed, so the links come first; your own choice is remembered in this browser.
+    const closed = statsClosed[caption] ?? window.matchMedia('(max-width: 520px)').matches;
+    const head = h(
+      'button',
+      { type: 'button', class: 'stats-title', title, 'aria-expanded': closed ? 'false' : 'true' },
+      h('span', { class: 'chev', 'aria-hidden': 'true', text: '▾' }),
+      h('span', { text: caption })
+    );
+    head.addEventListener('click', () => {
+      statsClosed[caption] = !closed;
+      try {
+        localStorage.setItem('hub-stats-closed', JSON.stringify(statsClosed));
+      } catch {
+        // storage blocked: lasts until reload
+      }
+      renderStats();
+    });
+    els.stats.append(head);
+    if (closed) {
+      const parts = [];
+      if (s.cpuPercent != null) parts.push(`${t('CPU')} ${s.cpuPercent} %`);
+      if (s.memory?.total > 0) parts.push(`${t('Memory')} ${Math.round((s.memory.used / s.memory.total) * 100)} %`);
+      if (s.load) parts.push(`${t('Load')} ${s.load[0].toFixed(2)}`);
+      for (const d of s.disks ?? []) if (d.totalBytes) parts.push(`${d.name} ${Math.round(((d.totalBytes - d.freeBytes) / d.totalBytes) * 100)} %`);
+      els.stats.append(h('div', { class: 'stats-line', text: parts.join(' · ') }));
+      return;
+    }
+  }
   if (s.cpuPercent != null) {
     const note = [s.cores ? t('{n} threads', { n: s.cores }) : '', s.cpuTempC != null ? `${s.cpuTempC} °C` : ''].filter(Boolean).join(' · ');
     els.stats.append(statBox(t('CPU'), `${s.cpuPercent} %`, note, { pct: s.cpuPercent, wide: true }));
@@ -391,15 +428,17 @@ function togglePin(key) {
 }
 
 function card(svc, groupName) {
-  const status = svc.status in STATUS_LABEL ? svc.status : 'unknown';
+  const plain = svc.status === 'none'; // a plain link (check: none): no dot
+  const status = plain ? 'none' : svc.status in STATUS_LABEL ? svc.status : 'unknown';
   const pillTitle = [t(svc.detail), svc.ms != null ? `${svc.ms} ms` : ''].filter(Boolean).join(' · ');
-  const pill = h('span', { class: `pill ${status}`, title: pillTitle, text: t(STATUS_LABEL[status]) });
+  const pill = plain ? null : h('span', { class: `pill ${status}`, title: pillTitle, text: t(STATUS_LABEL[status]) });
   const top = h('div', { class: 'row' }, iconFor(svc.icon), h('span', { class: 'name', text: svc.name }), pill);
   const href = linkFor(svc);
   const homeOnly = !svc.url; // no public address: only reachable on the home network
   const hostText = href ? hostOf(href) : t('{host} (home network only)', { host: hostOf(svc.localUrl) });
   const meta = h('div', { class: 'meta' }, h('span', { class: 'host', text: hostText }), healthBadge(svc));
   const body = [top];
+  if (svc.description) body.push(h('div', { class: 'desc', text: svc.description }));
   const cls = `card ${status}${href ? '' : ' homeonly'}`;
   const a = href
     ? h('a', { class: cls, href, target: '_blank', rel: 'noopener noreferrer' }, ...body)
@@ -444,6 +483,13 @@ function toggleGroup(name, close) {
 const GROUP_LABEL = { up: 'All online', down: 'Offline', partial: 'Some offline', none: 'Not checked yet' };
 
 /** green = all online, red = all offline, amber = some offline; services without a verdict don't count. */
+/** "3 of 4 online" (plain links are not counted), or "5 links" for a group of plain links only. */
+function groupCount(g, up) {
+  const checked = g.services.filter((s) => s.status !== 'none').length;
+  if (checked > 0) return t('{n} of {m} online', { n: up, m: checked });
+  return g.services.length === 1 ? t('1 link') : t('{n} links', { n: g.services.length });
+}
+
 function groupState(g) {
   let up = 0;
   let down = 0;
@@ -458,7 +504,7 @@ function groupState(g) {
 function renderGroups() {
   const q = els.filter.value.trim().toLowerCase();
   els.groups.replaceChildren();
-  const matches = (s, g) => !q || `${s.name} ${hostOf(s.url || s.localUrl)} ${g.name}`.toLowerCase().includes(q);
+  const matches = (s, g) => !q || `${s.name} ${s.description ?? ''} ${hostOf(s.url || s.localUrl)} ${g.name}`.toLowerCase().includes(q);
   let shown = 0;
 
   // Pinned services come first, in the order they were pinned, and stay in their own group below too.
@@ -490,7 +536,7 @@ function renderGroups() {
       h('span', { class: 'chev', 'aria-hidden': 'true', text: '▾' }),
       h('span', { class: `gdot ${state}`, title: t(GROUP_LABEL[state]) }),
       h('span', { class: 'gname', text: g.name }),
-      h('span', { class: 'gcount', text: t('{n} of {m} online', { n: up, m: g.services.length }) })
+      h('span', { class: 'gcount', text: groupCount(g, up) })
     );
     head.addEventListener('click', () => toggleGroup(g.name, !closed));
     const section = h('section', { class: `group${closed ? ' closed' : ''}` }, h('h2', {}, head));

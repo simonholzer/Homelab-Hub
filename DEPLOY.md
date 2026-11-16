@@ -9,7 +9,7 @@ and change two things:
 - the port, if 8080 is taken (e.g. `"30082:8080"`)
 
 Save and open `http://<nas>:<port>`. The container fixes the owner of the config folder by itself. To update, pull the
-new image in the app's menu. To stay on one version, write it instead of `latest` in the image line (e.g. `:1.1.0`).
+new image in the app's menu. To stay on one version, write it instead of `latest` in the image line (e.g. `:1.2.0`).
 
 To show the stats of other machines too, run [compose.agent.yaml](compose.agent.yaml) on them (README, "Stats from
 other machines"). On a second TrueNAS box that is another custom app with that file. The rest of this page is only needed for the other way.

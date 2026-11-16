@@ -74,7 +74,11 @@ export function createAuth({ password = '', protects = 'all', now = () => Date.n
 }
 
 /** What the page may load without a login: the login page and what it is made of. */
-export const PUBLIC_PATHS = new Set(['/login', '/login.html', '/login.js', '/i18n.js', '/theme.js', '/style.css', '/favicon.svg', '/healthz']);
+export const PUBLIC_PATHS = new Set([
+  '/login', '/login.html', '/login.js', '/i18n.js', '/theme.js', '/style.css', '/favicon.svg', '/healthz',
+  // "install as app": browsers fetch these without the login cookie
+  '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png'
+]);
 
 /** Where to go after the login: only a path on this hub, never another site. */
 export function safeNext(next) {

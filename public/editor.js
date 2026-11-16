@@ -13,7 +13,8 @@ const ICONS = {
   plus: 'M12 5v14M5 12h14',
   x: 'M6 6l12 12M18 6L6 18',
   copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
-  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3'
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01'
 };
 const NO_CHECK = ['none', 'off', 'no', 'false'];
 
@@ -565,7 +566,7 @@ function checkField(svc) {
     { class: 'cfg-in' },
     h('option', { value: 'auto', text: 'Automatic: check the service address' }),
     h('option', { value: 'custom', text: 'Check another address' }),
-    h('option', { value: 'none', text: 'No check (grey dot)' })
+    h('option', { value: 'none', text: 'No check: a plain link without a dot' })
   );
   select.value = mode;
   const custom = input(() => (mode === 'custom' ? svc.check : ''), (v) => (svc.check = v), { mono: true, placeholder: 'http://{nas}:8080  or  tcp://{pi}:22', label: 'Address to check' });
@@ -602,6 +603,7 @@ function svcForm(svc, refreshHead) {
     'div',
     { class: 'cfg-svcform' },
     grid(2, field('Name', input(() => svc.name, (v) => put(svc, 'name', v), { after: refreshHead })), iconPicker(svc, refreshHead)),
+    field('Description', input(() => svc.description, (v) => put(svc, 'description', v)), 'A short line under the name. Optional.'),
     grid(
       2,
       field('Public address', addr('url', 'https://app.example.net'), 'Opened when you are away. Empty = home network only.'),
@@ -676,6 +678,7 @@ function svcItem(svc, i, list, redraw) {
   const head = h(
     'div',
     { class: 'cfg-svchead' },
+    grip('svc', list, i),
     summary,
     h(
       'span',
@@ -699,6 +702,7 @@ function svcItem(svc, i, list, redraw) {
     )
   );
   const el = h('div', { class: `cfg-svc${open ? ' open' : ''}` }, head, open ? svcForm(svc, refreshHead) : null);
+  el.dropInfo = { kind: 'svc', list: () => list, i };
   return el;
 }
 
@@ -711,6 +715,7 @@ function secGroup(g, gi, groups) {
   const head = h(
     'div',
     { class: 'cfg-grouphead' },
+    grip('group', groups, gi),
     input(() => g.name, (v) => put(g, 'name', v), { big: true, placeholder: 'Group name', label: 'Group name', after: renderNav }),
     count,
     h(
@@ -736,14 +741,101 @@ function secGroup(g, gi, groups) {
     const forms = ui.main.querySelectorAll(`#cfg-group-${gi} .cfg-svcform`);
     forms[forms.length - 1]?.querySelector('input')?.focus();
   });
-  return h(
+  const svcs = h('div', { class: 'cfg-svcs' }, ...list.map((svc, i) => svcItem(svc, i, list, redraw)));
+  // a service dropped on the group (not on another service) goes to its end; an empty group gets its list then
+  const ownList = () => (Array.isArray(g.services) ? g.services : (g.services = []));
+  svcs.dropInfo = { kind: 'svc', list: ownList, i: list.length };
+  const sec = h(
     'section',
     { class: 'cfg-sec cfg-group', id: `cfg-group-${gi}` },
     head,
     check('Container health badges for every card', g.autoContainers === true, (on) => put(g, 'autoContainers', on || undefined), 'Matches Docker containers by the card name; cards without a container get no badge.'),
-    h('div', { class: 'cfg-svcs' }, ...list.map((svc, i) => svcItem(svc, i, list, redraw))),
+    svcs,
     h('div', { class: 'cfg-add' }, add)
   );
+  sec.dropInfo = { kind: 'group', list: () => groups, i: gi };
+  return sec;
+}
+
+// ---- drag and drop: services (also into another group) and groups, with mouse, pen or finger ----
+// Elements that can take a drop carry .dropInfo = {kind, list(), i}. The handle follows the pointer
+// itself (pointer events, not the browser's drag and drop, which does not work on touch screens).
+let drag = null; // {kind, list, i, target: {list, at} | null, marked}
+
+function clearDropMark() {
+  drag?.marked?.classList.remove('cfg-drop-before', 'cfg-drop-after', 'cfg-drop-end');
+  if (drag) drag.marked = null;
+}
+
+function dragMove(e) {
+  // near the top or bottom edge: scroll, so a far-away place can be reached
+  const box = ui.main.getBoundingClientRect();
+  if (e.clientY < box.top + 48) ui.main.scrollTop -= 16;
+  else if (e.clientY > box.bottom - 48) ui.main.scrollTop += 16;
+
+  clearDropMark();
+  drag.target = null;
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  if (!under || !ui.main.contains(under)) return;
+  let el = drag.kind === 'svc' ? under.closest('.cfg-svc') : null;
+  if (!el) {
+    const group = under.closest('.cfg-group');
+    if (!group) return;
+    el = drag.kind === 'svc' ? group.querySelector('.cfg-svcs') : group;
+  }
+  const info = el.dropInfo;
+  if (!info || info.kind !== drag.kind) return;
+  if (el.classList.contains('cfg-svcs')) {
+    drag.target = { list: info.list, at: info.i };
+    el.classList.add('cfg-drop-end');
+  } else {
+    const r = el.getBoundingClientRect();
+    const after = e.clientY > r.top + r.height / 2;
+    drag.target = { list: info.list, at: info.i + (after ? 1 : 0) };
+    el.classList.add(after ? 'cfg-drop-after' : 'cfg-drop-before');
+  }
+  drag.marked = el;
+}
+
+function dragEnd(e) {
+  if (!drag) return;
+  const d = drag;
+  clearDropMark();
+  drag = null;
+  document.body.classList.remove('cfg-dragging');
+  ui.main.querySelector('.cfg-dragged')?.classList.remove('cfg-dragged');
+  if (e.type !== 'pointerup' || !d.target) return;
+  const to = d.target.list();
+  let at = d.target.at;
+  if (to === d.list && (at === d.i || at === d.i + 1)) return; // dropped where it was
+  const [item] = d.list.splice(d.i, 1);
+  if (to === d.list && d.i < at) at--;
+  to.splice(at, 0, item);
+  touched();
+  renderForm();
+}
+
+/** The handle to drag a service or a group by. */
+function grip(kind, list, i) {
+  const b = h('span', { class: 'cfg-grip', title: 'Drag to move' }, svg('grip', 16));
+  b.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    try {
+      b.setPointerCapture(e.pointerId); // moves keep coming to the handle, wherever the pointer goes
+    } catch {
+      // no capture (unusual pointer): dragging still works while the pointer stays on the handle
+    }
+    drag = { kind, list, i, target: null, marked: null };
+    document.body.classList.add('cfg-dragging');
+    b.closest(kind === 'svc' ? '.cfg-svc' : '.cfg-group')?.classList.add('cfg-dragged');
+  });
+  b.addEventListener('pointermove', (e) => {
+    if (drag) dragMove(e);
+  });
+  b.addEventListener('pointerup', dragEnd);
+  b.addEventListener('pointercancel', dragEnd);
+  return b;
 }
 
 function renderNav() {

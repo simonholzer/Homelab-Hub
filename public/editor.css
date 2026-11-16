@@ -190,6 +190,17 @@ select.cfg-in { cursor: pointer; }
 .cfg-svc:hover { border-color: var(--border-strong); }
 .cfg-svc.open { border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong)); }
 .cfg-svchead { display: flex; align-items: center; gap: 4px; padding-right: 6px; }
+/* drag handle (services and groups); touch-action none = a finger drags instead of scrolling */
+.cfg-grip { display: grid; place-items: center; flex: none; width: 26px; height: 34px; margin-left: 4px; border-radius: 6px; color: var(--muted); cursor: grab; touch-action: none; }
+.cfg-grip:hover { background: var(--panel-hover); color: var(--text); }
+.cfg-grip .cfg-ic { stroke-width: 2.6; }
+.cfg-grouphead .cfg-grip { margin-left: -6px; }
+body.cfg-dragging, body.cfg-dragging * { cursor: grabbing !important; user-select: none; }
+.cfg-dragged { opacity: 0.45; }
+.cfg-drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
+.cfg-drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+.cfg-svcs.cfg-drop-end { box-shadow: 0 3px 0 0 var(--accent); min-height: 10px; }
+.cfg-group.cfg-drop-before, .cfg-group.cfg-drop-after { border-radius: 4px; }
 .cfg-svcsum {
   flex: 1;
   min-width: 0;
@@ -298,4 +309,12 @@ select.cfg-in { cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   .cfg-svcsum > .cfg-ic { transition: none; }
+}
+
+/* phones: the drag handle stays beside the service, the buttons go on a second line */
+@media (max-width: 640px) {
+  .cfg-svchead { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
+  .cfg-svchead .cfg-acts { grid-column: 1 / -1; justify-self: end; margin: -6px 0 6px; }
+  .cfg-grip { width: 34px; height: 44px; }
+  .cfg-machine { padding: 10px; }
 }

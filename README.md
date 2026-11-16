@@ -21,6 +21,8 @@ Everything is configured in **one YAML file**, which you can also edit on the pa
 - **Config editor on the page** (form or plain YAML) with validation; a broken config never takes the page down
 - **Icons by name**: `icon: jellyfin` is fetched once from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) and kept
 - **Optional password login**, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
+- **Plain links** next to the checked services: bookmarks with an optional description line
+- **Works on a phone** and can be installed as an app (home screen, own window)
 - Dark and light theme, English and German
 - Node.js, one dependency (`yaml`), no build step, no database; images for amd64 and arm64 (Raspberry Pi)
 
@@ -40,8 +42,8 @@ add your own services. The config is stored in `./data/services.yaml`.
 - **Just looking?** `npm install && npm run demo` shows the page with made-up data on `http://localhost:8099`.
 
 **Versions and updates:** `compose.yaml` uses the tag `latest`, which follows the newest state of the project. To
-stay on a version until you decide to move, write it instead, e.g. `ghcr.io/simonholzer/homelab-hub:1.1.0` (also
-`:1.1` for the newest 1.1.x and `:1` for the newest 1.x). All versions and what changed are under
+stay on a version until you decide to move, write it instead, e.g. `ghcr.io/simonholzer/homelab-hub:1.2.0` (also
+`:1.2` for the newest 1.2.x and `:1` for the newest 1.x). All versions and what changed are under
 [Releases](https://github.com/simonholzer/Homelab-Hub/releases) and in [CHANGELOG.md](CHANGELOG.md). To update:
 
 ```bash
@@ -75,7 +77,8 @@ working version and shows a red box naming the problem.
 
 **On the page:** gear menu → **Edit YAML**. The *Visual* tab is a form for everything in the file: general settings
 (timing, home network, reverse proxy, language, Docker labels), hosts, server stats with storage tiles and other
-machines, and groups and services with add / remove / reorder / duplicate and an icon picker. The *YAML* tab is the
+machines, and groups and services with add / remove / duplicate and an icon picker. Services and groups are reordered by
+dragging their handle (⠿), with mouse or finger; a service can be dragged into another group. The *YAML* tab is the
 same file as plain text. Problems
 are listed while you type, and a config with problems is not saved. Saving applies at once, keeps the comments and
 layout of everything you did not touch, and leaves the version before in `services.yaml.bak`.
@@ -100,11 +103,22 @@ groups:
 | `url` | Public address the card opens. Optional if `local` is set |
 | `local` | Address the card opens on the home network (optional; alone = "home network only") |
 | `icon` | Icon name (see below). Missing = default icon |
-| `check` | `http://…` / `https://…` (online = any answer below 500), `tcp://host:port` (port accepts connections), or `none` |
+| `description` | A short line under the name (optional) |
+| `check` | `http://…` / `https://…` (online = any answer below 500), `tcp://host:port` (port accepts connections), or `none` for a plain link |
 | `insecure` | `true` accepts a self-signed certificate on the check (Cockpit, Portainer) |
 | `containers` | Patterns (`*` wildcard) matched against container name, compose project or service name |
 | `hidden` | `true` keeps the entry but hides it |
 | `hosts` | Aliases usable as `{name}` in `url`, `local` and `check` |
+
+**Plain links:** a card with `check: none` is a bookmark: no dot, not counted as online or offline. Use it for
+things that are not services of yours, such as the router's page, a provider's dashboard or your notes.
+
+```yaml
+      - name: Router
+        description: Port forwarding, DHCP, Wi-Fi
+        local: http://192.168.1.1
+        check: none
+```
 
 **Icons:** write the name of any icon from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
 (`jellyfin`, `home-assistant`, `pi-hole` …). If the hub doesn't have it yet, it downloads the SVG once into `icons/`
@@ -219,6 +233,21 @@ browser. `settings.language: de` in the YAML sets the default for everyone who h
 Texts that come from the server (config problems, some check details) are English.
 Another language is one block in [public/i18n.js](public/i18n.js); see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## On a phone, and as an app
+
+The page adapts to small screens: one column of cards, and each machine's stats fold into one line (tap the caption
+to open them; the choice is remembered).
+
+To get it onto the home screen or into its own window:
+
+- **Android (Chrome):** menu ⋮ → *Add to Home screen* / *Install app*
+- **iPhone / iPad (Safari):** Share → *Add to Home Screen*
+- **Desktop (Chrome, Edge):** the install icon at the right end of the address bar, or menu → *Install Homelab Hub*
+
+Browsers only offer installing on `https://` addresses (and on `localhost`). On a plain `http://192.168.…` address
+"Add to Home screen" still makes a shortcut, but it opens as a normal browser tab. The hub does not work offline: it
+shows live data, so nothing is stored on the device.
+
 ## Run it without Docker
 
 ```bash
@@ -249,6 +278,9 @@ Environment variables:
 
 ## Open it like an app on Windows (taskbar)
 
+The browser's own "Install" (see above) is the simplest way. This script is the alternative for plain `http://`
+addresses, or to pick a specific Chrome profile:
+
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\windows-shortcut.ps1 -Url https://hub.example.com/
 ```
@@ -277,7 +309,7 @@ hand: right-click the shortcut → **Pin to taskbar**.
 |---|---|
 | `config/services.yaml`, `config/starter.yaml` | Full example config; the small one a new install starts with |
 | `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `icons.js`, `editor.js` (config editor API) |
-| `public/` | The page: `index.html`, `app.js`, `style.css`, `i18n.js` (translations), `theme.js`, the login page, the config editor, `icons/` |
+| `public/` | The page: `index.html`, `app.js`, `style.css`, `i18n.js` (translations), `theme.js`, the login page, the config editor, `manifest.webmanifest` and app icons, `icons/` |
 | `test/` | `node --test` suites, with fake servers and `/proc` fixtures |
 | `Dockerfile`, `docker-entrypoint.sh`, `compose.yaml`, `compose.agent.yaml` | Docker: the hub, and the agent for other machines |
 | `compose.truenas.yaml`, `scripts/`, `DEPLOY.md` | Building on a TrueNAS box, helper scripts |

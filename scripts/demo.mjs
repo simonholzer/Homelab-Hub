@@ -149,6 +149,11 @@ groups:
       - { name: Cockpit, icon: cockpit, url: "https://cockpit.example.com", local: "https://{pi}:9090", check: "${up}" }
       - { name: Browser SSH, icon: terminal, url: "https://ssh.example.com", check: "${up}" }
       - { name: BlueMap, icon: bluemap, url: "https://map.example.com", check: "${down}" }
+  - name: Links
+    services:
+      - { name: Router, description: "Port forwarding, DHCP, Wi-Fi", local: "http://192.168.1.1", check: none }
+      - { name: Documentation, icon: obsidian, description: "Notes about this setup", url: "https://notes.example.com", check: none }
+      - { name: Domain, description: "DNS records and tunnels", url: "https://dash.example.com", check: none }
 `);
 
 const child = spawn(process.execPath, ['src/server.js'], {

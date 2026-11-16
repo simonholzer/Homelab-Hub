@@ -2,6 +2,21 @@
 
 Every released version, newest first. The Docker image of a version is `ghcr.io/simonholzer/homelab-hub:<version>`.
 
+## 1.2.0
+
+- **Plain links.** A card with `check: none` is now a bookmark: no dot, not counted as online or offline. A group
+  of only links shows "3 links" instead of "0 of 3 online".
+- **Description line.** `description:` (or the Description field in the editor) shows a short line under the name;
+  the filter searches it too.
+- **Drag and drop in the editor.** Services and groups are moved by their handle, with mouse or finger; a service
+  can be dragged into another group. The up/down buttons stay.
+- **Phone layout.** One column, larger touch targets, the gear menu fits the screen, and each machine's stats fold
+  into one line (tap the caption to open; on larger screens they start open).
+- **Install as app.** Web app manifest and icons, so browsers offer "Install" / "Add to Home screen".
+
+Changed behaviour: a service with `check: none` used to show a grey "Unknown" dot and count as unknown; it now has
+no dot. Updating needs no changes to the config.
+
 ## 1.1.0
 
 - **Stats from other machines.** The same image runs as a small agent on another machine (`HUB_MODE=agent`,

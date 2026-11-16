@@ -69,13 +69,14 @@ stats:
 #   name         shown on the card
 #   url          public address the card links to (through Cloudflare). Optional if `local` is set.
 #   local        address used instead when you are on the home network (optional)
+#   description  a short line under the name (optional)
 #   icon         name of a file in public/icons (without .svg), e.g. immich. Without one, or if the
 #                file doesn't exist, a default icon is shown. Icons come from the open
 #                "dashboard-icons" set (https://github.com/homarr-labs/dashboard-icons).
 #   check        what decides the green/red dot (optional)
 #                  http://{nas}:2283    open web address; any answer below 500 = online
 #                  tcp://{pi}:22        only test that the port accepts connections
-#                  none                 no dot (grey)
+#                  none                 no check at all: a plain link (bookmark) without a dot
 #                If left out, `url` is checked. That is only meaningful for addresses that are NOT
 #                behind Cloudflare Access: Access answers with its login page even when the service
 #                is dead, so such cards show a grey "unknown" dot. Point `check` at the real
@@ -178,3 +179,16 @@ groups:
 
       - name: Status page
         url: https://status.example.com        # no Cloudflare login, so the public address is checked
+
+  # Plain links: bookmarks for things that are not services of yours. No dot, not counted.
+  - name: Links
+    services:
+      - name: Router
+        description: Port forwarding, DHCP, Wi-Fi
+        local: http://192.168.1.1
+        check: none
+
+      - name: Domain
+        description: DNS records and tunnels
+        url: https://dash.cloudflare.com
+        check: none

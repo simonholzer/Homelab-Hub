@@ -25,7 +25,8 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json; charset=utf-8'
 };
 
 const SECURITY_HEADERS = {
@@ -36,7 +37,7 @@ const SECURITY_HEADERS = {
 };
 
 const sha = (data) => crypto.createHash('sha1').update(data).digest('hex').slice(0, 10);
-const COMPRESSIBLE = new Set(['.html', '.css', '.js', '.svg', '.json']);
+const COMPRESSIBLE = new Set(['.html', '.css', '.js', '.svg', '.json', '.webmanifest']);
 /** A file asked for with its current version in the address never changes under that address. */
 const KEEP_FOREVER = 'public, max-age=31536000, immutable';
 

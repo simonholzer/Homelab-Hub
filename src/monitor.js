@@ -220,10 +220,11 @@ export class Monitor {
       icon: g.icon,
       services: g.services.map((s) => {
         const r = this.results.get(s.id);
-        const status = r ? r.status : 'pending';
+        // no check configured (check: none): a plain link, without a dot and not counted anywhere
+        const status = !s.check ? 'none' : r ? r.status : 'pending';
         if (status === 'up') up++;
         else if (status === 'down') down++;
-        else unknown++;
+        else if (status !== 'none') unknown++;
         const watch = s.containers.length > 0 || s.autoContainers;
         const c = watch ? this.containerSummary.get(s.id) ?? null : null;
         // automatic matching: a badge only once a container was found (no "?" on every card when Docker is unreachable)
