@@ -2,7 +2,7 @@
 // Opened from the gear menu (app.js loads this file on the first click). The server does the YAML work
 // (src/editor.js): this page only edits a copy of the parsed file and sends it back.
 // All text goes in through textContent / input values (config values are never HTML).
-import { t, hasText } from '/i18n.js';
+import { t, hasText, LANGUAGES } from '/i18n.js';
 
 const ID = '__i'; // position marker the server puts on list entries; kept as it is
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -245,6 +245,12 @@ function secGeneral() {
   const s = () => child(m, 'settings');
   const num = (key, placeholder, min, max) =>
     withUnit(input(() => m.settings?.[key], (v) => put(s(), key, v), { type: 'number', min, max, placeholder }), 'seconds');
+  const language = h('select', { class: 'cfg-in' }, h('option', { value: 'auto', text: "Automatic: the browser's language" }), ...Object.entries(LANGUAGES).map(([code, name]) => h('option', { value: code, rawText: name })));
+  language.value = Object.hasOwn(LANGUAGES, m.settings?.language) ? m.settings.language : 'auto';
+  language.addEventListener('change', () => {
+    put(s(), 'language', language.value === 'auto' ? undefined : language.value);
+    touched();
+  });
   return section(
     'cfg-general',
     'General',
@@ -285,6 +291,23 @@ function secGeneral() {
         'Host names of your login pages',
         listInput(() => m.settings?.loginHosts, (arr) => put(s(), 'loginHosts', arr.length ? arr : undefined), { placeholder: 'auth.example.com' }),
         'E.g. auth.example.com. A check that is redirected there shows "unknown" instead of green.'
+      )
+    ),
+    h('h4', { text: 'Page' }),
+    grid(
+      2,
+      h(
+        'div',
+        { class: 'cfg-f' },
+        h('span', { class: 'cfg-l', text: 'Language' }),
+        language,
+        h('span', { class: 'cfg-h', text: 'For browsers that have not chosen one in the gear menu.' })
+      ),
+      h(
+        'div',
+        { class: 'cfg-f' },
+        h('span', { class: 'cfg-l', text: 'Docker' }),
+        check('Cards from Docker labels', m.settings?.dockerLabels !== false, (on) => put(s(), 'dockerLabels', on ? undefined : false), 'Containers with homelab-hub.* labels get a card by themselves.')
       )
     )
   );
@@ -358,66 +381,101 @@ function secHosts() {
 function secStats() {
   const m = st.model;
   const stats = () => child(m, 'stats');
-  const disks = Array.isArray(m.stats?.disks) ? m.stats.disks : [];
-  const rows = disks.map((d, i) =>
-    isObject(d)
-      ? h(
-          'div',
-          { class: 'cfg-row disks' },
-          input(() => d.name, (v) => put(d, 'name', v), { placeholder: 'Name', label: 'Name' }),
-          input(() => d.path, (v) => put(d, 'path', v), { mono: true, placeholder: '/pools/tank', label: 'Path' }),
-          input(() => d.size, (v) => put(d, 'size', v), { mono: true, placeholder: 'size, e.g. 3.6T', label: 'Total size' }),
-          h(
-            'span',
-            { class: 'cfg-acts' },
-            iconBtn('up', 'Move up', () => move(disks, i, -1), { disabled: i === 0 }),
-            iconBtn('down', 'Move down', () => move(disks, i, 1), { disabled: i === disks.length - 1 }),
-            iconBtn('trash', 'Remove', () => {
-              disks.splice(i, 1);
-              touched();
-              renderForm();
-            }, { danger: true })
+  /** The storage tiles of one machine (the hub itself or another one): rows plus the "add" button. `owner.disks` is the list. */
+  const diskEditor = (owner, pathHint) => {
+    const disks = Array.isArray(owner.disks) ? owner.disks : [];
+    const box = h('div', { class: 'cfg-disks' });
+    const rows = disks.map((d, i) =>
+      isObject(d)
+        ? h(
+            'div',
+            { class: 'cfg-row disks' },
+            input(() => d.name, (v) => put(d, 'name', v), { placeholder: 'Name', label: 'Name' }),
+            input(() => d.path, (v) => put(d, 'path', v), { mono: true, placeholder: pathHint, label: 'Path' }),
+            input(() => d.size, (v) => put(d, 'size', v), { mono: true, placeholder: 'size, e.g. 3.6T', label: 'Total size' }),
+            h(
+              'span',
+              { class: 'cfg-acts' },
+              iconBtn('up', 'Move up', () => move(disks, i, -1), { disabled: i === 0 }),
+              iconBtn('down', 'Move down', () => move(disks, i, 1), { disabled: i === disks.length - 1 }),
+              iconBtn('trash', 'Remove', () => {
+                disks.splice(i, 1);
+                if (disks.length === 0) delete owner.disks;
+                touched();
+                renderForm();
+              }, { danger: true })
+            )
           )
-        )
-      : null
-  );
+        : null
+    );
+    const add = textBtn('plus', 'Add storage tile', () => {
+      if (!Array.isArray(owner.disks)) owner.disks = [];
+      const fresh = { name: '', path: '' };
+      owner.disks.push(fresh);
+      focusNew = fresh;
+      touched();
+      renderForm();
+    });
+    box.append(...rows.filter(Boolean), h('div', { class: 'cfg-add' }, add));
+    // the row that was just added gets the cursor
+    const at = disks.indexOf(focusNew);
+    if (at >= 0) {
+      focusNew = null;
+      queueMicrotask(() => box.querySelectorAll('.cfg-row.disks')[at]?.querySelector('input')?.focus());
+    }
+    return box;
+  };
+
   const machines = Array.isArray(m.stats?.machines) ? m.stats.machines : [];
-  const machineRows = machines.map((mc, i) =>
-    isObject(mc)
-      ? h(
-          'div',
-          { class: 'cfg-row disks' },
-          input(() => mc.name, (v) => put(mc, 'name', v), { placeholder: 'Name', label: 'Name' }),
-          input(() => mc.url, (v) => put(mc, 'url', v.trim()), { mono: true, placeholder: 'http://{pi}:8080', label: 'Address of the agent' }),
-          input(() => mc.token, (v) => put(mc, 'token', v.trim()), { mono: true, placeholder: 'token (optional)', label: 'Token' }),
-          h(
-            'span',
-            { class: 'cfg-acts' },
-            iconBtn('up', 'Move up', () => move(machines, i, -1), { disabled: i === 0 }),
-            iconBtn('down', 'Move down', () => move(machines, i, 1), { disabled: i === machines.length - 1 }),
-            iconBtn('trash', 'Remove', () => {
-              machines.splice(i, 1);
-              if (machines.length === 0) delete stats().machines;
-              touched();
-              renderForm();
-            }, { danger: true })
-          )
+  const machineBoxes = machines.map((mc, i) => {
+    if (!isObject(mc)) return null;
+    const title = h('span', { class: 'cfg-machine-name' });
+    const showTitle = () => (title.textContent = mc.name || t('Unnamed machine'));
+    showTitle();
+    return h(
+      'div',
+      { class: 'cfg-machine' },
+      h(
+        'div',
+        { class: 'cfg-machine-head' },
+        title,
+        h(
+          'span',
+          { class: 'cfg-acts' },
+          iconBtn('up', 'Move up', () => move(machines, i, -1), { disabled: i === 0 }),
+          iconBtn('down', 'Move down', () => move(machines, i, 1), { disabled: i === machines.length - 1 }),
+          iconBtn('trash', 'Remove', () => {
+            if ((mc.url || mc.disks?.length) && !confirm(t('Remove the machine "{name}"?', { name: mc.name ?? '' }))) return;
+            machines.splice(i, 1);
+            if (machines.length === 0) delete stats().machines;
+            touched();
+            renderForm();
+          }, { danger: true })
         )
-      : null
-  );
+      ),
+      grid(
+        2,
+        field('Name', input(() => mc.name, (v) => put(mc, 'name', v), { placeholder: 'Raspberry Pi', after: showTitle })),
+        field('Address of the agent', input(() => mc.url, (v) => put(mc, 'url', v.trim()), { mono: true, placeholder: 'http://{pi}:8081' }), 'Where the hub in agent mode answers on that machine. {host} shortcuts work.')
+      ),
+      grid(
+        2,
+        field('Token', input(() => mc.token, (v) => put(mc, 'token', v.trim()), { mono: true, placeholder: 'none' }), 'Only if the agent has AGENT_TOKEN set: the same text.'),
+        field('Network cards', listInput(() => mc.network, (arr) => put(mc, 'network', arr.length ? arr : undefined), { placeholder: 'all physical cards' }), 'For the network speed tile, e.g. eth0')
+      ),
+      check('Hide this machine', mc.hidden === true, (on) => put(mc, 'hidden', on || undefined)),
+      h('h5', { text: 'Storage tiles' }),
+      h('p', { class: 'cfg-desc', text: 'Paths as the agent sees them (the right-hand side of its volume mounts).' }),
+      diskEditor(mc, '/pools/root')
+    );
+  });
   const addMachine = textBtn('plus', 'Add machine', () => {
     if (!Array.isArray(stats().machines)) stats().machines = [];
     stats().machines.push({ name: '', url: '' });
     touched();
     renderForm();
-  });
-  const add = textBtn('plus', 'Add storage tile', () => {
-    if (!Array.isArray(stats().disks)) stats().disks = [];
-    stats().disks.push({ name: '', path: '' });
-    touched();
-    renderForm();
-    const names = ui.main.querySelectorAll('#cfg-stats .cfg-row.disks input:first-child');
-    names[names.length - 1]?.focus();
+    const boxes = ui.main.querySelectorAll('#cfg-stats .cfg-machine');
+    boxes[boxes.length - 1]?.querySelector('input')?.focus();
   });
   return section(
     'cfg-stats',
@@ -429,14 +487,14 @@ function secStats() {
       field('Network cards', listInput(() => m.stats?.network, (arr) => put(stats(), 'network', arr.length ? arr : undefined), { placeholder: 'all physical cards' }), 'For the network speed tile, e.g. eno1')
     ),
     h('h4', { text: 'Storage tiles' }),
-    ...rows,
-    h('div', { class: 'cfg-add' }, add),
+    diskEditor(stats(), '/pools/tank'),
     h('h4', { text: 'Other machines' }),
-    h('p', { class: 'cfg-desc', text: 'Machines that run the hub in agent mode (HUB_MODE=agent). Their numbers are shown below this one\'s. Storage tiles of another machine are set in the YAML tab (disks: under the machine).' }),
-    ...machineRows,
+    h('p', { class: 'cfg-desc', text: 'Machines that run the hub in agent mode (HUB_MODE=agent). Each gets its own row of tiles below this one\'s.' }),
+    ...machineBoxes,
     h('div', { class: 'cfg-add' }, addMachine)
   );
 }
+let focusNew = null; // the storage tile that was just added (see diskEditor)
 
 const iconUrl = (name) => (st.icons[name] ? `/icons/${name}.svg?v=${st.icons[name]}` : '/icons/default.svg');
 

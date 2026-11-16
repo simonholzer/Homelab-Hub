@@ -108,7 +108,7 @@ export async function fetchMachineStats(machine, timeoutMs = 4000) {
     if (code === 'ECONNREFUSED') throw new Error('Connection refused');
     if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') throw new Error('DNS lookup failed');
     if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') throw new Error('Host unreachable');
-    throw new Error(code || err.message || 'Failed');
+    throw new Error(code || (err.message === 'fetch failed' ? err.cause?.message : err.message) || 'Not reachable');
   }
   let data = null;
   try {

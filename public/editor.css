@@ -172,6 +172,13 @@ select.cfg-in { cursor: pointer; }
 .cfg-row { display: grid; gap: 8px; align-items: center; }
 .cfg-row.hosts { grid-template-columns: minmax(110px, 190px) minmax(0, 1fr) 72px auto; }
 .cfg-row.disks { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 0.9fr) auto; }
+/* another machine (stats.machines): a box with its own fields and storage tiles */
+.cfg-machine { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.cfg-machine + .cfg-machine { margin-top: 2px; }
+.cfg-machine-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cfg-machine-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cfg-machine h5 { margin: 4px 0 -6px; color: var(--muted); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+.cfg-disks { display: flex; flex-direction: column; gap: 8px; }
 .cfg-brace { display: flex; align-items: center; gap: 4px; color: var(--accent); font: 600 0.95rem ui-monospace, Consolas, monospace; }
 .cfg-used { color: var(--muted); font-size: 0.76rem; white-space: nowrap; }
 
