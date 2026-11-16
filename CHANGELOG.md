@@ -2,6 +2,27 @@
 
 Every released version, newest first. The Docker image of a version is `ghcr.io/simonholzer/homelab-hub:<version>`.
 
+## 1.3.0
+
+Everything in this version is about the first hour with the hub.
+
+- **Edit from where you are.** A pencil on every card and group opens the editor at that entry. The menu entry is
+  now called "Edit services and settings" instead of "Edit YAML".
+- **Found on this server.** The editor lists containers that publish a port and have no card yet; one click makes a
+  card with name, icon and home address.
+- **First-start guide.** A new hub shows three steps: add services, let the hub look for them, set a password.
+- **Password on the page.** Set, change or remove it in the gear menu; stored as a salted hash in `hub-auth.json`.
+  `HUB_PASSWORD` in the compose file still works and wins.
+- **Clear hints instead of silence.** A storage tile whose path isn't mounted says which line to add; missing server
+  stats say why; a hub that is set to "not on the home network" while running on a server shows a notice.
+- **Import** from Homepage, Dashy and Homarr, **backup download and restore**, and the last 10 saved versions are
+  kept in `backups/`.
+- **Update notice.** The gear menu shows the running version and links to a newer release (`UPDATE_CHECK: "off"`
+  switches the check off).
+- **View options per browser:** compact cards, and links in the same tab or a new one.
+- **compose.yaml** now keeps the config in a Docker volume, so a new install needs no folder and no decision.
+  Existing installs keep working as they are; nothing has to be changed.
+
 ## 1.2.0
 
 - **Plain links.** A card with `check: none` is now a bookmark: no dot, not counted as online or offline. A group

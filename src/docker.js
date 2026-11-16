@@ -37,6 +37,8 @@ export function normalizeContainer(c) {
     state,
     status,
     health,
+    // TCP ports published on the host (for the "found on this server" suggestions)
+    ports: [...new Set((c.Ports ?? []).filter((p) => p.PublicPort && (p.Type ?? 'tcp') === 'tcp').map((p) => p.PublicPort))].sort((a, b) => a - b),
     ...(Object.keys(hub).length > 0 ? { labels: hub } : {})
   };
 }

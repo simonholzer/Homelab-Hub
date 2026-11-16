@@ -2,7 +2,7 @@
 # The page re-reads it every check cycle (about 30 s), no restart needed.
 # If you make a mistake, the page keeps the last working version and shows what is wrong.
 #
-# You can also edit it on the page: gear menu (top right) -> Edit YAML.
+# You can also edit it on the page: gear menu (top right) -> Edit services and settings.
 # A full example with every option: config/services.yaml in the project
 # (see the repository).
 

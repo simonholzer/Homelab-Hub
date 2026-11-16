@@ -56,8 +56,9 @@ writeNet();
 setInterval(writeNet, 500).unref();
 
 // fake Docker: a few containers, one of them with labels that make a card by themselves
-const container = (name, project, status, labels = {}) => ({
-  Id: name, Names: [`/${name}`], Image: 'img', State: 'running', Status: status,
+const container = (name, project, status, labels = {}, ports = []) => ({
+  Id: name, Names: [`/${name}`], Image: project, State: 'running', Status: status,
+  Ports: ports.map((p) => ({ PrivatePort: p, PublicPort: p, Type: 'tcp', IP: '0.0.0.0' })),
   Labels: { 'com.docker.compose.project': project, ...labels }
 });
 const docker = http.createServer((req, res) => {
@@ -69,6 +70,10 @@ const docker = http.createServer((req, res) => {
     container('jellyfin-1', 'jellyfin', 'Up 5 days'),
     container('n8n-1', 'n8n', 'Up 5 days (healthy)'),
     container('uptime-kuma-1', 'uptime-kuma', 'Up 3 hours (unhealthy)'),
+    // two apps without a card: the editor lists them under "Found on this server"
+    container('paperless-ngx-1', 'paperless-ngx', 'Up 4 days (healthy)', {}, [8010]),
+    container('vaultwarden-1', 'vaultwarden', 'Up 4 days (healthy)', {}, [8222]),
+    container('paperless-redis-1', 'redis', 'Up 4 days', {}, [6379]),
     container('grafana-1', 'monitoring', 'Up 9 days (healthy)', {
       'homelab-hub.name': 'Grafana',
       'homelab-hub.group': 'Monitoring',

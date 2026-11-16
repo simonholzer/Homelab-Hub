@@ -2,8 +2,8 @@
 # The page re-reads it every check cycle (about 30 s), no restart needed.
 # If you make a mistake, the page keeps the last working version and shows what is wrong.
 #
-# This is the EXAMPLE config. In Docker it is copied to /config/services.yaml on the first
-# start; from then on you edit that copy (or use the editor on the page: gear menu -> Edit YAML).
+# This is the full EXAMPLE config, with every option. A new install starts with the small
+# config/starter.yaml instead and is edited on the page (gear menu -> Edit services and settings).
 # Replace the addresses, domain (example.com) and services with your own.
 
 title: Homelab Hub

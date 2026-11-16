@@ -18,9 +18,11 @@ Everything is configured in **one YAML file**, which you can also edit on the pa
 - **Cards from Docker labels**: label a container and its card appears by itself
 - **Stats from several machines**: the same image runs as a small agent on your other servers
 - **Home network detection**: at home the cards open the LAN address, away the public one
-- **Config editor on the page** (form or plain YAML) with validation; a broken config never takes the page down
+- **Everything is edited on the page**: a form with drag and drop (or the plain YAML), with validation; a broken config never takes the page down
+- **Finds your services**: lists what runs in Docker on the server, one click makes a card
+- **Import** from Homepage, Dashy and Homarr
 - **Icons by name**: `icon: jellyfin` is fetched once from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) and kept
-- **Optional password login**, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
+- **Optional password login**, set on the page, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
 - **Plain links** next to the checked services: bookmarks with an optional description line
 - **Works on a phone** and can be installed as an app (home screen, own window)
 - Dark and light theme, English and German
@@ -34,34 +36,43 @@ Save [compose.yaml](compose.yaml) on your server, then:
 docker compose up -d
 ```
 
-Open `http://<server>:8080`. The page starts with one example card: open the gear menu (top right) → **Edit YAML** and
-add your own services. The config is stored in `./data/services.yaml`.
+Open `http://<server>:8080`. A new hub shows three steps: add your services, let it look for what already runs in Docker
+on the server, and set a password. Everything is edited on the page; the gear menu (top right) → **Edit services and
+settings** opens the editor at any time, and the pencil on a card or group opens it right there.
+The config is kept in a Docker volume, so it survives updates.
 
-- **Storage tiles:** add one mount line per disk or pool in `compose.yaml` and one entry under `stats.disks`.
+- **Storage tiles:** add one mount line per disk or pool in `compose.yaml` and one tile in the editor (*Server stats*).
+  A tile whose path isn't mounted says so, with the line to add.
+- **Other machines:** [compose.agent.yaml](compose.agent.yaml) on each, see "Stats from other machines".
 - **TrueNAS:** paste the same file under *Apps → Discover Apps → ⋮ → Install via YAML*; details in [DEPLOY.md](DEPLOY.md).
 - **Just looking?** `npm install && npm run demo` shows the page with made-up data on `http://localhost:8099`.
 
 **Versions and updates:** `compose.yaml` uses the tag `latest`, which follows the newest state of the project. To
-stay on a version until you decide to move, write it instead, e.g. `ghcr.io/simonholzer/homelab-hub:1.2.0` (also
-`:1.2` for the newest 1.2.x and `:1` for the newest 1.x). All versions and what changed are under
+stay on a version until you decide to move, write it instead, e.g. `ghcr.io/simonholzer/homelab-hub:1.3.0` (also
+`:1.3` for the newest 1.3.x and `:1` for the newest 1.x). All versions and what changed are under
 [Releases](https://github.com/simonholzer/Homelab-Hub/releases) and in [CHANGELOG.md](CHANGELOG.md). To update:
 
 ```bash
 docker compose pull && docker compose up -d
 ```
 
-Your config in `./data` is kept.
+Your config is kept. The gear menu shows the running version and, when there is one, a link to a newer release
+(the hub asks GitHub twice a day; `UPDATE_CHECK: "off"` stops that).
 
 > **Who can open it?** Without a password, anyone who can reach the port can see the page and edit the config. That is
-> fine on a home network you trust. For anything else, set `HUB_PASSWORD` (below) or put a login proxy in front.
+> fine on a home network you trust. For anything else, set a password (below) or put a login proxy in front.
 
 ## Password login (optional)
 
-Set these in `compose.yaml` under `environment:`:
+**On the page:** gear menu → **Set a password**. Choose whether it protects the whole page or only the editor. It can
+be changed or removed in the same place. It is stored as a salted hash in `hub-auth.json` next to the config; if you
+forget it, delete that file on the server.
+
+**In the compose file,** if you prefer it fixed there (it then can't be changed on the page):
 
 | Variable | Meaning |
 |---|---|
-| `HUB_PASSWORD` | The password. Unset or empty = no login |
+| `HUB_PASSWORD` | The password. Unset or empty = no fixed password |
 | `HUB_PASSWORD_PROTECTS` | `all` (default): the whole page needs the login. `editor`: everyone sees the page, only the config editor needs it |
 
 The login lasts 30 days per browser; changing the password logs everyone out. Five wrong passwords lock that address
@@ -70,19 +81,33 @@ password travels unencrypted.
 
 ## Edit the config
 
-In Docker the file is `/config/services.yaml` (`./data/services.yaml` on the host), created on the first start.
+In Docker the file is `/config/services.yaml` (in the `hub-config` volume, or in the folder you mounted), created on the first start.
 [config/services.yaml](config/services.yaml) is a full example with every option.
 The hub re-reads the file every check cycle (about 30 s), no restart. A mistake never breaks the page: it keeps the last
 working version and shows a red box naming the problem.
 
-**On the page:** gear menu → **Edit YAML**. The *Visual* tab is a form for everything in the file: general settings
+**On the page:** gear menu → **Edit services and settings**, or the pencil on a card or group. The *Visual* tab is a form for everything in the file: general settings
 (timing, home network, reverse proxy, language, Docker labels), hosts, server stats with storage tiles and other
 machines, and groups and services with add / remove / duplicate and an icon picker. Services and groups are reordered by
 dragging their handle (⠿), with mouse or finger; a service can be dragged into another group. The *YAML* tab is the
-same file as plain text. Problems
+same file as plain text.
+
+- **Found on this server** lists containers that publish a port and have no card yet. *Add* makes a normal card with
+  the home address filled in; you add the public address if there is one. Databases, caches and tunnels are left out.
+  It needs the docker-proxy from `compose.yaml`. The hub can't know your public addresses or which port is the web
+  page when a container publishes several, so check the card after adding.
+- **Import and backup** (at the end of the form): import the config of Homepage (`services.yaml`), Dashy (`conf.yml`)
+  or Homarr (JSON export); names, addresses, icons and descriptions are taken over, widgets are not. *Download a
+  backup* saves the config as a file, *Restore from a file* loads one. The hub also keeps the last 10 saved versions in
+  `backups/` next to the config.
+
+Problems
 are listed while you type, and a config with problems is not saved. Saving applies at once, keeps the comments and
 layout of everything you did not touch, and leaves the version before in `services.yaml.bak`.
 To switch the editor off, set `CONFIG_EDITOR: "off"`.
+
+In the gear menu each browser can also choose **compact cards** (more per row, one line each) and whether links open
+in a **new tab**.
 
 ```yaml
 hosts:
@@ -162,7 +187,7 @@ hub with that machine's numbers.
 **On the other machine:** save [compose.agent.yaml](compose.agent.yaml) as `compose.yaml` and run `docker compose up -d`
 (or without Docker: `HUB_MODE=agent PORT=8081 node src/server.js`).
 
-**On the hub:** gear menu → Edit YAML → *Server stats* → *Other machines* → **Add machine**, or in the YAML:
+**On the hub:** gear menu → Edit services and settings → *Server stats* → *Other machines* → **Add machine**, or in the YAML:
 
 ```yaml
 stats:
@@ -273,6 +298,7 @@ Environment variables:
 | `HUB_PASSWORD`, `HUB_PASSWORD_PROTECTS` | | Login, see above |
 | `CONFIG_EDITOR` | on | `off` removes the editor |
 | `ICON_DOWNLOAD` | on | `off` never fetches icons |
+| `UPDATE_CHECK` | on | `off` never asks GitHub for the latest version. `UPDATE_REPO` (`owner/name`) points it at a fork |
 | `PUID`, `PGID` | `1000` | Docker only: the user the hub runs as |
 | `HUB_MODE`, `AGENT_TOKEN` | | Agent mode, see "Stats from other machines" |
 
@@ -308,7 +334,7 @@ hand: right-click the shortcut → **Pin to taskbar**.
 | Path | What |
 |---|---|
 | `config/services.yaml`, `config/starter.yaml` | Full example config; the small one a new install starts with |
-| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `icons.js`, `editor.js` (config editor API) |
+| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `discover.js` (found on this server), `import.js`, `update.js`, `icons.js`, `editor.js` (config editor API) |
 | `public/` | The page: `index.html`, `app.js`, `style.css`, `i18n.js` (translations), `theme.js`, the login page, the config editor, `manifest.webmanifest` and app icons, `icons/` |
 | `test/` | `node --test` suites, with fake servers and `/proc` fixtures |
 | `Dockerfile`, `docker-entrypoint.sh`, `compose.yaml`, `compose.agent.yaml` | Docker: the hub, and the agent for other machines |

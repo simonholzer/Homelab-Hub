@@ -1,6 +1,6 @@
 #!/bin/sh
 # Started as root (the default): makes the config folder writable for the hub's user, then drops
-# root before the hub starts. So a fresh, root-owned ./data folder just works.
+# root before the hub starts. So a fresh, root-owned config folder or volume just works.
 # Started as another user (compose `user:`, TrueNAS): nothing to prepare, the hub starts as that user.
 set -e
 

@@ -1,23 +1,41 @@
-# Homelab Hub agent: run this on ANOTHER machine whose CPU, memory, load, network and storage
-# the hub should show too. It has no page and no config; it only answers the hub.
-#   1. save this file as compose.yaml on that machine
-#   2. docker compose up -d
-#   3. on the hub, add the machine under stats.machines in the YAML (see the README)
+# Homelab Hub AGENT: for ANOTHER machine (a Raspberry Pi, a second server, a VPS) whose CPU, memory,
+# load, network and storage the hub should show too. The agent has no page and no config; it only
+# answers the hub. The hub itself is installed with compose.yaml, not with this file.
+#
+# On the other machine:
+#   1. save this file as compose.yaml
+#   2. set AGENT_TOKEN below to a long random text (optional, but do it unless the network is yours alone)
+#   3. docker compose up -d
+#   4. check: http://<this machine>:8081/healthz  answers  {"ok":true,"mode":"agent"}
+#
+# On the hub: gear menu -> Edit services and settings -> Server stats -> Other machines -> Add machine
+#   Name:     Raspberry Pi
+#   Address:  http://<this machine>:8081
+#   Token:    the same text as AGENT_TOKEN
+#   Storage tiles: one per mount below, with the right-hand path (e.g. /pools/root)
+# or the same in the YAML:
+#   stats:
+#     machines:
+#       - name: Raspberry Pi
+#         url: http://192.168.1.20:8081
+#         token: a-long-random-text
+#         disks:
+#           - { name: SD card, path: /pools/root, size: 29G }
 services:
   homelab-hub-agent:
-    image: ghcr.io/simonholzer/homelab-hub:latest   # or a fixed version, e.g. :1.2.0
+    image: ghcr.io/simonholzer/homelab-hub:latest   # the same image as the hub; or a fixed version, e.g. :1.3.0
     restart: unless-stopped
     ports:
       - "8081:8080"             # the hub asks http://<this machine>:8081
     volumes:
       - /proc:/host/proc:ro     # CPU, memory, load, uptime
       - /sys:/host/sys:ro       # CPU temperature, network cards
-      # Storage tiles: mount what the hub should report the free space of (read-only; only the
-      # free space is read). The paths on the right are the ones you write on the hub (disks: path:).
-      # - /:/pools/root:ro
+      # Storage tiles: what the hub may report the free space of (read-only; only the free space is
+      # read, never a file). The right-hand path is what you enter for the tile on the hub.
+      - /:/pools/root:ro
       # - /mnt/data:/pools/data:ro
     environment:
       HUB_MODE: agent
       PROC_PATH: /host/proc
       SYS_PATH: /host/sys
-      # AGENT_TOKEN: "a-long-random-text"   # the hub must then send the same text (token: in the YAML)
+      # AGENT_TOKEN: "a-long-random-text"   # the hub must then send the same text

@@ -171,6 +171,19 @@ function writeFile(file, text) {
   }
 }
 
+export const BACKUPS_KEPT = 10;
+
+/** Copies the file into backups/ next to it, named by time, and keeps only the newest ones. */
+export function keepBackup(file, now = new Date()) {
+  const dir = path.join(path.dirname(file), 'backups');
+  const stamp = now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  const ext = path.extname(file);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(file, path.join(dir, `${path.basename(file, ext)}-${stamp}${ext}`));
+  const old = fs.readdirSync(dir).filter((f) => f.endsWith(ext)).sort().reverse().slice(BACKUPS_KEPT);
+  for (const f of old) fs.rmSync(path.join(dir, f), { force: true });
+}
+
 function isWritable(file) {
   try {
     fs.accessSync(file, fs.constants.W_OK);
@@ -334,6 +347,7 @@ export function createConfigApi({ getFile, getIcons = () => ({}), onSaved = () =
       if (text !== current) {
         try {
           fs.copyFileSync(file, `${file}.bak`); // the version before this save
+          keepBackup(file);
         } catch {
           // no backup possible (read-only folder): the save below will say what is wrong
         }

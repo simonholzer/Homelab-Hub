@@ -35,7 +35,7 @@ try {
 }
 
 // What the page shows: chosen in the gear menu, remembered in this browser.
-const prefs = { health: true, stats: true, pinned: true, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', lang: 'auto' };
+const prefs = { health: true, stats: true, pinned: true, newTab: true, compact: false, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', lang: 'auto' };
 const THEMES = ['auto', 'dark', 'light'];
 /** A whole number of seconds within the allowed range, or null. */
 function validRefresh(value) {
@@ -44,7 +44,7 @@ function validRefresh(value) {
 }
 try {
   const saved = JSON.parse(localStorage.getItem('hub-prefs') ?? '{}');
-  for (const key of ['health', 'stats', 'pinned']) if (typeof saved[key] === 'boolean') prefs[key] = saved[key];
+  for (const key of ['health', 'stats', 'pinned', 'newTab', 'compact']) if (typeof saved[key] === 'boolean') prefs[key] = saved[key];
   prefs.refreshSeconds = validRefresh(saved.refreshSeconds) ?? DEFAULT_REFRESH_SECONDS;
   if (Array.isArray(saved.hiddenGroups)) prefs.hiddenGroups = saved.hiddenGroups.filter((n) => typeof n === 'string');
   if (THEMES.includes(saved.theme)) prefs.theme = saved.theme;
@@ -64,6 +64,25 @@ function savePrefs() {
 function applyTheme() {
   if (prefs.theme === 'auto') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = prefs.theme;
+  document.body.classList.toggle('compact', prefs.compact);
+}
+
+/** Things this browser was told once and should not see again (the first-start guide, a notice). */
+let dismissed = [];
+try {
+  const saved = JSON.parse(localStorage.getItem('hub-dismissed') ?? '[]');
+  if (Array.isArray(saved)) dismissed = saved.filter((k) => typeof k === 'string');
+} catch {
+  // storage blocked: shown again after a reload
+}
+function dismiss(key) {
+  dismissed = [...new Set([...dismissed, key])];
+  try {
+    localStorage.setItem('hub-dismissed', JSON.stringify(dismissed));
+  } catch {
+    // storage blocked: lasts until reload
+  }
+  render();
 }
 
 /** The language chosen in this browser, else the one set in the YAML, else the browser's. Returns true when it changed. */
@@ -192,6 +211,20 @@ function renderNetmode() {
 
 function renderBanner() {
   const parts = [];
+  // The hub runs in a container on a server, yet is told it is "not on the home network" (a setting
+  // meant for a preview on a laptop, easily copied along with a config): local addresses are then never used.
+  if (data?.client?.via === 'server-network' && data.stats?.source === 'proc' && !dismissed.includes('runs-at-home')) {
+    const box = h('div', {}, t('This hub is set to "not on the home network", so cards never open their local addresses. If this server is at home, switch on "This hub runs on the home network".') + ' ');
+    if (data.editor) {
+      const fix = h('button', { type: 'button', text: t('Open the setting') });
+      fix.addEventListener('click', () => openEditor({ section: 'cfg-general' }));
+      box.append(fix);
+    }
+    const hide = h('button', { type: 'button', text: t('Hide') });
+    hide.addEventListener('click', () => dismiss('runs-at-home'));
+    box.append(hide);
+    parts.push({ cls: '', node: box });
+  }
   if (data?.configError) {
     const box = h('div', {});
     box.append(h('strong', { text: t('Config problem') }), document.createTextNode(t(data.configError.message)));
@@ -245,8 +278,13 @@ function renderStats() {
   const s = data?.stats;
   const machines = (data?.machines ?? []).filter((m) => m.stats || m.error);
   els.stats.replaceChildren();
-  els.stats.hidden = (!s && machines.length === 0) || !prefs.stats;
+  // no numbers although this is a server: say why instead of showing nothing (only to who can fix it)
+  const why = !s && data?.statsError && data.editor ? data.statsError : '';
+  els.stats.hidden = (!s && machines.length === 0 && !why) || !prefs.stats;
   if (els.stats.hidden) return;
+  if (why) {
+    els.stats.append(h('div', { class: 'stats-line', text: t('No server stats: {error}. In Docker, mount /proc and /sys of the host as in the example compose file.', { error: why }) }));
+  }
   if (s) {
     const preview = s.source === 'os';
     appendStats(
@@ -336,7 +374,13 @@ function appendStats(s, caption, title = '') {
   if (s.uptimeSeconds != null) els.stats.append(statBox(t('Uptime'), formatUptime(s.uptimeSeconds)));
   for (const d of s.disks ?? []) {
     if (d.error) {
-      els.stats.append(statBox(d.name, t('unreadable'), d.error));
+      const hint =
+        d.error === 'ENOENT' && d.path
+          ? t('{path} does not exist inside the container. Add a line like this to the volumes in your compose file, then restart:  - /path/on/the/server:{path}:ro', { path: d.path })
+          : d.error === 'EACCES'
+            ? t('No permission to read {path}.', { path: d.path ?? '' })
+            : d.error;
+      els.stats.append(statBox(d.name, t('unreadable'), hint, { wide: true }));
     } else if (d.totalBytes) {
       const used = d.totalBytes - d.freeBytes;
       const pct = (used / d.totalBytes) * 100;
@@ -358,6 +402,7 @@ function healthBadge(svc) {
 }
 
 const DEFAULT_ICON = '/icons/default.svg';
+const PENCIL = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>';
 
 /** The app's icon: a file from /icons named in the config, or the default one. */
 // Logos have no background. Dark ones (Portainer, Cockpit, ...) would vanish on the dark page, so each
@@ -441,7 +486,7 @@ function card(svc, groupName) {
   if (svc.description) body.push(h('div', { class: 'desc', text: svc.description }));
   const cls = `card ${status}${href ? '' : ' homeonly'}`;
   const a = href
-    ? h('a', { class: cls, href, target: '_blank', rel: 'noopener noreferrer' }, ...body)
+    ? h('a', { class: cls, href, target: prefs.newTab ? '_blank' : null, rel: 'noopener noreferrer' }, ...body)
     : h('div', { class: cls, title: t('Only reachable on the home network. Switch to Home at the top if you are there.') }, ...body);
   if (status === 'down' && svc.detail) a.append(h('div', { class: 'problem', text: t(svc.detail) }));
   if (homeOnly && href) a.append(h('div', { class: 'tag', text: t('home network only') }));
@@ -459,7 +504,14 @@ function card(svc, groupName) {
   });
   pin.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2h-4v6l-1 1-1-1v-6H7v-2l3-3z"/></svg>'; // fixed markup, no config text
   pin.addEventListener('click', () => togglePin(key));
-  return h('div', { class: 'cardwrap' }, a, pin);
+  // straight to this card in the editor (cards made from Docker labels are not in the config)
+  let edit = null;
+  if (data?.editor && !svc.fromDocker) {
+    edit = h('button', { type: 'button', class: 'pin edit', 'aria-label': t('Edit {name}', { name: svc.name }), title: t('Edit') });
+    edit.innerHTML = PENCIL; // fixed markup, no config text
+    edit.addEventListener('click', () => openEditor({ group: groupName, service: svc.name }));
+  }
+  return h('div', { class: `cardwrap${edit ? ' editable' : ''}` }, a, edit, pin);
 }
 
 // ---- open / closed servers: remembered in this browser ----
@@ -539,7 +591,13 @@ function renderGroups() {
       h('span', { class: 'gcount', text: groupCount(g, up) })
     );
     head.addEventListener('click', () => toggleGroup(g.name, !closed));
-    const section = h('section', { class: `group${closed ? ' closed' : ''}` }, h('h2', {}, head));
+    let editGroup = null;
+    if (data?.editor && !String(g.id).startsWith('d:')) {
+      editGroup = h('button', { type: 'button', class: 'gedit', 'aria-label': t('Edit {name}', { name: g.name }), title: t('Edit this group') });
+      editGroup.innerHTML = PENCIL; // fixed markup, no config text
+      editGroup.addEventListener('click', () => openEditor({ group: g.name }));
+    }
+    const section = h('section', { class: `group${closed ? ' closed' : ''}` }, h('h2', {}, head, editGroup));
     if (!closed) {
       const cards = h('div', { class: 'cards' });
       for (const s of list) cards.append(card(s, g.name));
@@ -552,14 +610,107 @@ function renderGroups() {
   els.empty.textContent = !none
     ? t('Nothing matches your filter.')
     : data?.editor
-      ? t('No services yet. Open the gear menu at the top right and choose "Edit YAML" to add your first one.')
+      ? t('No services yet. Open the gear menu at the top right and choose "Edit services and settings" to add your first one.')
       : t('No services yet. Add them to the config file.');
+}
+
+/**
+ * The first-start guide: shown while the hub still has its starter config (or nothing at all), to
+ * whoever may edit. Three steps, each a button; "Hide" puts it away for this browser.
+ */
+function renderGuide() {
+  const host = $('guide');
+  const services = (data?.groups ?? []).flatMap((g) => g.services);
+  const fresh = services.length === 0 || (services.length === 1 && data.groups[0].name === 'Getting started');
+  const show = Boolean(data?.editor) && fresh && !dismissed.includes('guide') && !(data.auth?.enabled && !data.auth.loggedIn);
+  host.hidden = !show;
+  host.replaceChildren();
+  if (!show) return;
+  const step = (title, text, label, onClick) => {
+    const b = h('button', { type: 'button', class: 'set-btn', text: label });
+    b.addEventListener('click', onClick);
+    return h('li', {}, h('strong', { text: title }), h('span', { text: text }), b);
+  };
+  const steps = [
+    step(t('Add your services'), t('One card per web page you want to reach from here. Everything is edited on this page.'), t('Open the editor'), () => openEditor()),
+    step(t('Let the hub look for them'), t('It lists what runs in Docker on this server; one click turns an entry into a card.'), t('Show what was found'), () => openEditor({ section: 'cfg-found' }))
+  ];
+  if (data.auth?.canSet && !data.auth.enabled) {
+    steps.push(step(t('Protect it'), t('Right now anyone who can reach this address can see and change everything. Fine at home; set a password otherwise.'), t('Set a password'), openPassword));
+  }
+  const hide = h('button', { type: 'button', class: 'guide-hide', text: t('Hide') });
+  hide.addEventListener('click', () => dismiss('guide'));
+  host.append(h('div', { class: 'guide-head' }, h('h2', { text: t('Welcome. Three steps to your own hub:') }), hide), h('ol', {}, ...steps));
+}
+
+// ---- password: set, change or remove it on the page (not when it comes from HUB_PASSWORD) ----
+let passwordDialog = null;
+function openPassword() {
+  passwordDialog?.remove();
+  const enabled = data?.auth?.enabled === true;
+  const field = (label, name, auto) => {
+    const input = h('input', { type: 'password', name, autocomplete: auto, required: true, minlength: 8 });
+    return [h('label', {}, h('span', { text: label }), input), input];
+  };
+  const [l1, first] = field(enabled ? t('New password') : t('Password'), 'new-password', 'new-password');
+  const [l2, second] = field(t('Repeat it'), 'repeat-password', 'new-password');
+  const protects = h('select', {}, h('option', { value: 'all', text: t('The whole page') }), h('option', { value: 'editor', text: t('Only the editor (everyone can see the page)') }));
+  protects.value = data?.auth?.mode ?? 'all';
+  const error = h('p', { class: 'login-error', role: 'alert', hidden: true });
+  const send = async (body) => {
+    error.hidden = true;
+    try {
+      const res = await fetch('/api/password', { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const answer = await res.json();
+      if (res.ok) return location.reload();
+      error.textContent = t(answer.error ?? 'Not saved.');
+    } catch {
+      error.textContent = t("Can't reach the hub right now.");
+    }
+    error.hidden = false;
+  };
+  const save = h('button', { type: 'submit', class: 'primary', text: t('Save') });
+  const cancel = h('button', { type: 'button', text: t('Cancel') });
+  cancel.addEventListener('click', () => passwordDialog.close());
+  const buttons = h('div', { class: 'pw-buttons' }, cancel, save);
+  if (enabled) {
+    const remove = h('button', { type: 'button', class: 'danger', text: t('Remove the password') });
+    remove.addEventListener('click', () => {
+      if (confirm(t('Remove the password? Anyone who can reach the hub can then see and change everything.'))) send({ remove: true });
+    });
+    buttons.prepend(remove);
+  }
+  const form = h(
+    'form',
+    { class: 'pw-form' },
+    h('h2', { text: enabled ? t('Change the password') : t('Set a password') }),
+    h('p', { class: 'set-note', text: t('At least 8 characters. Forgotten? Delete the file hub-auth.json next to the config file on the server.') }),
+    l1,
+    l2,
+    h('label', {}, h('span', { text: t('It protects') }), protects),
+    error,
+    buttons
+  );
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (first.value !== second.value) {
+      error.textContent = t('The two passwords are not the same.');
+      error.hidden = false;
+      return;
+    }
+    send({ password: first.value, protects: protects.value });
+  });
+  passwordDialog = h('dialog', { class: 'pw', 'aria-label': t('Password') }, form);
+  document.body.append(passwordDialog);
+  passwordDialog.showModal();
+  first.focus();
 }
 
 function renderFooter() {
   const parts = [];
   if (data?.checkedAt) parts.push(t('checked {ago}', { ago: ago(data.checkedAt) }));
   if (data?.checkIntervalSeconds) parts.push(t('every {n} s', { n: data.checkIntervalSeconds }));
+  gear.classList.toggle('has-update', Boolean(data?.update) && data.editor === true);
   els.updated.textContent = parts.join(' · ');
 }
 
@@ -574,6 +725,7 @@ function render() {
   renderNetmode();
   renderBanner();
   renderStats();
+  renderGuide();
   // The cards are only rebuilt when something on them changed (most refreshes change nothing).
   const cards = JSON.stringify([data?.groups, data?.icons, data?.client?.home, data?.dockerError, data?.editor]);
   if (cards !== drawnCards) {
@@ -585,9 +737,10 @@ function render() {
 
 // ---- config editor: its script and style are fetched on the first click ----
 let editorLoading = null;
-async function openEditor() {
-  // the editor needs the login (HUB_PASSWORD_PROTECTS=editor): log in first, then come back and open it
-  if (data?.auth && !data.auth.loggedIn) return location.assign('/login?next=' + encodeURIComponent('/#edit'));
+/** @param {{group?: string, service?: string, section?: string}} [target]  where the editor opens (default: the top) */
+async function openEditor(target) {
+  // the editor needs the login (password that protects only the editor): log in first, then come back and open it
+  if (data?.auth?.enabled && !data.auth.loggedIn) return location.assign('/login?next=' + encodeURIComponent('/#edit'));
   const tag = document.querySelector('script[data-editor-js]');
   editorLoading ??= Promise.all([
     import(tag.dataset.editorJs),
@@ -600,7 +753,7 @@ async function openEditor() {
   ]);
   try {
     const [editor] = await editorLoading;
-    editor.openEditor();
+    editor.openEditor(target);
   } catch {
     editorLoading = null; // try again on the next click
     alert(t('The editor could not be loaded. Check the connection and try again.'));
@@ -673,6 +826,16 @@ function renderSettings() {
       savePrefs();
       renderGroups();
     }),
+    toggleRow(t('Compact cards'), prefs.compact, (on) => {
+      prefs.compact = on;
+      savePrefs();
+      applyTheme();
+    }),
+    toggleRow(t('Open links in a new tab'), prefs.newTab, (on) => {
+      prefs.newTab = on;
+      savePrefs();
+      renderGroups();
+    }),
     h('div', { class: 'set-title', text: t('Refresh') }),
     refreshRow(),
     h('div', { class: 'set-title', text: t('Appearance') }),
@@ -692,7 +855,7 @@ function renderSettings() {
     h('p', { class: 'set-note', text: t('Saved in this browser only.') })
   );
   if (data?.editor) {
-    const edit = h('button', { type: 'button', class: 'set-btn', text: t('Edit YAML') });
+    const edit = h('button', { type: 'button', class: 'set-btn', text: t('Edit services and settings') });
     edit.addEventListener('click', () => {
       setPanel(false);
       openEditor();
@@ -702,6 +865,25 @@ function renderSettings() {
       edit,
       h('p', { class: 'set-note', text: t('Services, groups, hosts and settings. Saved on the hub for everyone.') })
     );
+  }
+  if (data?.auth?.canSet && data.editor && (!data.auth.enabled || data.auth.loggedIn)) {
+    const pw = h('button', { type: 'button', class: 'set-btn', text: data.auth.enabled ? t('Change the password') : t('Set a password') });
+    pw.addEventListener('click', () => {
+      setPanel(false);
+      openPassword();
+    });
+    panel.append(
+      h('div', { class: 'set-title', text: t('Password') }),
+      pw,
+      h('p', { class: 'set-note', text: data.auth.enabled ? t('The hub asks for it before it shows anything.') : t('No password is set: anyone who can reach this address can see and change everything.') })
+    );
+  }
+  if (data?.version) {
+    const line = h('p', { class: 'set-note version', text: t('Version {v}', { v: data.version }) });
+    if (data.update) {
+      line.append(' · ', h('a', { href: data.update.url, target: '_blank', rel: 'noopener noreferrer', text: t('{v} is available', { v: data.update.version }) }));
+    }
+    panel.append(line);
   }
   if (data?.auth?.loggedIn) {
     const out = h('button', { type: 'button', class: 'set-btn', text: t('Log out') });

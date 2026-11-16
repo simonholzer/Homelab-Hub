@@ -838,6 +838,140 @@ function grip(kind, list, i) {
   return b;
 }
 
+// ---- found on this server: containers with a published port and no card yet ----
+let found = null; // null = not asked yet; {list, error}
+let foundGroup = ''; // name of the group new cards go into ('' = the first group)
+
+async function loadFound() {
+  try {
+    const { status, data } = await api('GET', '/api/config/suggestions');
+    found = status === 200 ? { list: data.suggestions ?? [], error: data.dockerError ?? '' } : { list: [], error: data.error ?? '' };
+  } catch (err) {
+    found = { list: [], error: err.message };
+  }
+  if (st?.tab === 'visual') document.getElementById('cfg-found')?.replaceWith(secFound());
+}
+
+/** The address of this server as the cards should write it: a host shortcut when one fits. */
+function serverHost() {
+  const hosts = isObject(st.model.hosts) ? st.model.hosts : {};
+  const here = location.hostname;
+  const match = Object.keys(hosts).find((k) => String(hosts[k]) === here);
+  if (match) return `{${match}}`;
+  const first = Object.keys(hosts)[0];
+  if (first) return `{${first}}`;
+  return /^[\d.]+$/.test(here) ? here : 'SERVER-IP';
+}
+
+function secFound() {
+  const groups = (Array.isArray(st.model.groups) ? st.model.groups : []).filter(isObject);
+  const host = serverHost();
+  const body = [];
+  if (!found) body.push(h('p', { class: 'cfg-desc', text: 'Looking…' }));
+  else if (found.error) body.push(h('p', { class: 'cfg-desc', text: 'Docker is not reachable, so nothing can be found here. It needs the docker-proxy from the example compose file.' }));
+  else if (found.list.length === 0) body.push(h('p', { class: 'cfg-desc', text: 'Nothing new: every container that publishes a port already has a card.' }));
+  else {
+    const select = h('select', { class: 'cfg-in', 'aria-label': 'Add to group' }, ...groups.map((g) => h('option', { value: g.name ?? '', rawText: g.name || t('Unnamed group') })), h('option', { value: '\u0000new', text: 'A new group' }));
+    if ([...select.options].some((o) => o.value === foundGroup)) select.value = foundGroup;
+    select.addEventListener('change', () => (foundGroup = select.value));
+    foundGroup = select.value;
+    const add = (s) => {
+      if (!Array.isArray(st.model.groups)) st.model.groups = [];
+      let g = st.model.groups.find((x) => isObject(x) && (x.name ?? '') === foundGroup);
+      if (!g || foundGroup === '\u0000new') {
+        g = { name: t('Services'), services: [] };
+        st.model.groups.push(g);
+        foundGroup = g.name;
+      }
+      if (!Array.isArray(g.services)) g.services = [];
+      const svc = { name: s.name, icon: s.icon, local: `${s.scheme}://${host}:${s.port}` };
+      if (s.scheme === 'https') svc.insecure = true; // a port like 9443 usually has a self-signed certificate
+      g.services.push(svc);
+      found.list = found.list.filter((x) => x !== s);
+      touched();
+      renderForm();
+    };
+    const rows = found.list.map((s) =>
+      h(
+        'div',
+        { class: 'cfg-found-row' },
+        h('img', { src: iconUrl(s.icon), alt: '', width: 26, height: 26 }),
+        h('span', { class: 'cfg-svctext' }, h('span', { class: 'cfg-svcname', rawText: s.name }), h('span', { class: 'cfg-svcsub', rawText: `${s.scheme}://${host}:${s.port}${s.ports.length > 1 ? `   (${t('also')} ${s.ports.filter((p) => p !== s.port).join(', ')})` : ''}` })),
+        textBtn('plus', 'Add', () => add(s))
+      )
+    );
+    body.push(
+      h('div', { class: 'cfg-found-head' }, h('span', { class: 'cfg-l', text: 'Add to group' }), select),
+      ...rows,
+      found.list.length > 1 ? h('div', { class: 'cfg-add' }, textBtn('plus', 'Add all', () => [...found.list].forEach(add))) : null
+    );
+  }
+  return section(
+    'cfg-found',
+    'Found on this server',
+    'Containers that publish a port and have no card yet. "Add" makes a normal card with the home address filled in; add the public address afterwards if there is one. Databases and other helpers are left out.',
+    ...body
+  );
+}
+
+// ---- tools: import from another dashboard, backup, restore ----
+function pickFile(accept) {
+  return new Promise((resolve) => {
+    const input = h('input', { type: 'file', accept });
+    input.addEventListener('change', async () => resolve(input.files[0] ? { name: input.files[0].name, text: await input.files[0].text() } : null));
+    input.click();
+  });
+}
+
+function secTools() {
+  const importBtn = textBtn(null, 'Import from Homepage, Dashy or Homarr…', async () => {
+    const file = await pickFile('.yaml,.yml,.json');
+    if (!file) return;
+    try {
+      const { status, data } = await api('POST', '/api/config/import', { text: file.text });
+      if (status !== 200) throw new Error(tr(data.error));
+      if (!Array.isArray(st.model.groups)) st.model.groups = [];
+      let cards = 0;
+      for (const g of data.groups) {
+        const own = st.model.groups.find((x) => isObject(x) && x.name === g.name);
+        const names = new Set((own?.services ?? []).map((s) => s?.name));
+        const fresh = g.services.filter((s) => !names.has(s.name));
+        cards += fresh.length;
+        if (own) (Array.isArray(own.services) ? own.services : (own.services = [])).push(...fresh);
+        else st.model.groups.push({ name: g.name, services: fresh });
+      }
+      touched();
+      renderForm();
+      st.note = t('{n} cards imported from {format}. Check them, then save.', { n: cards, format: data.format });
+    } catch (err) {
+      st.note = err.message;
+    }
+    updateStatus();
+  });
+  const download = textBtn(null, 'Download a backup', () => {
+    const a = h('a', { href: URL.createObjectURL(new Blob([st.saved.text], { type: 'text/yaml' })), download: 'homelab-hub-services.yaml' });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
+  const restore = textBtn(null, 'Restore from a file…', async () => {
+    const file = await pickFile('.yaml,.yml');
+    if (!file) return;
+    st.text = file.text;
+    st.tab = 'yaml'; // shown as text, checked like anything typed there; nothing is saved until "Save"
+    render();
+    st.note = t('Loaded {name}. Check it, then save.', { name: file.name });
+    touched();
+    st.note = t('Loaded {name}. Check it, then save.', { name: file.name });
+    updateStatus();
+  });
+  return section(
+    'cfg-tools',
+    'Import and backup',
+    'Import takes names, addresses, icons and descriptions from another dashboard\'s config file. The backup is this config as a file; the hub also keeps the last 10 saved versions in the folder "backups" next to the config.',
+    h('div', { class: 'cfg-tools' }, importBtn, download, restore)
+  );
+}
+
 function renderNav() {
   const jump = (label, id, cls = '') => {
     const b = h('button', { type: 'button', class: cls, [cls === 'sub' ? 'rawText' : 'text']: label });
@@ -849,8 +983,10 @@ function renderNav() {
     jump('General', 'cfg-general'),
     jump('Hosts', 'cfg-hosts'),
     jump('Server stats', 'cfg-stats'),
+    jump('Found on this server', 'cfg-found'),
     h('div', { class: 'cfg-navtitle', text: 'Groups' }),
-    ...groups.map((g, gi) => (isObject(g) ? jump(g.name || t('Unnamed group'), `cfg-group-${gi}`, 'sub') : null))
+    ...groups.map((g, gi) => (isObject(g) ? jump(g.name || t('Unnamed group'), `cfg-group-${gi}`, 'sub') : null)),
+    jump('Import and backup', 'cfg-tools')
   );
 }
 
@@ -871,9 +1007,11 @@ function renderForm() {
     secGeneral(),
     secHosts(),
     secStats(),
+    secFound(),
     h('div', { class: 'cfg-divider' }, h('h3', { text: 'Groups and services' }), h('p', { class: 'cfg-desc', text: 'One card per web UI. Click a service to edit it.' })),
     ...groups.map((g, gi) => secGroup(g, gi, groups)),
-    addGroup
+    addGroup,
+    secTools()
   );
   ui.main.scrollTop = scroll;
   renderNav();
@@ -1018,7 +1156,26 @@ function build() {
   document.body.append(dlg);
 }
 
-async function load() {
+/** Scrolls to a section, a group or one service (which is unfolded). */
+function showTarget(target) {
+  if (!target || !st?.model || st.tab !== 'visual') return;
+  let el = target.section ? document.getElementById(target.section) : null;
+  const groups = Array.isArray(st.model.groups) ? st.model.groups : [];
+  const gi = target.group == null ? -1 : groups.findIndex((g) => isObject(g) && g.name === target.group);
+  if (gi >= 0) {
+    const list = Array.isArray(groups[gi].services) ? groups[gi].services : [];
+    const si = target.service == null ? -1 : list.findIndex((s) => isObject(s) && s.name === target.service);
+    if (si >= 0) {
+      st.open.add(list[si]);
+      renderForm();
+      el = document.querySelectorAll(`#cfg-group-${gi} .cfg-svcs > .cfg-svc`)[si];
+    } else el = document.getElementById(`cfg-group-${gi}`);
+  }
+  el?.scrollIntoView({ block: 'start' });
+  el?.querySelector('.cfg-svcform input, input')?.focus({ preventScroll: true });
+}
+
+async function load(target) {
   build();
   st = null;
   ui.file.textContent = '';
@@ -1032,14 +1189,21 @@ async function load() {
     const { status, data } = await api('GET', '/api/config');
     if (status !== 200) throw new Error(tr(data.error) ?? t('The hub answered with an error ({status}).', { status }));
     adopt(data);
+    found = null;
     render();
+    showTarget(target);
+    loadFound();
   } catch (err) {
     ui.main.replaceChildren(h('p', { class: 'cfg-msg bad', text: err.message }));
   }
 }
 
 /** Opens the editor with the config as it is on the hub now. */
-export const openEditor = () => load();
+/**
+ * Opens the editor with the config as it is on the hub now.
+ * @param {{group?: string, service?: string, section?: string}} [target]  what to show first
+ */
+export const openEditor = (target) => load(target);
 window.addEventListener('beforeunload', (e) => {
   if (dlg?.open && st && isDirty()) e.preventDefault();
 });

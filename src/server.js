@@ -14,6 +14,11 @@ import { createAuth, PUBLIC_PATHS, safeNext } from './auth.js';
 import { createIconFetcher } from './icons.js';
 import { createAgentApp, AGENT_PATH } from './agent.js';
 import { StatsReader } from './stats.js';
+import { suggestServices } from './discover.js';
+import { importServices } from './import.js';
+import { createUpdateChecker, DEFAULT_REPO } from './update.js';
+
+export const VERSION = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -135,8 +140,9 @@ export const forgetIcons = () => iconCache.clear();
  * @param {Function} [o.downloadIcon]  override for tests
  * @param {object|null} [o.auth]  from createAuth(): the password login (null = none)
  * @param {boolean} [o.autoIcons]  true = icons that are named but missing are fetched from dashboard-icons
+ * @param {object|null} [o.update]  from createUpdateChecker(): tells the page about a newer version
  */
-export function createApp({ monitor, network, publicDir = path.join(root, 'public'), editor = true, iconsDir, downloadIcon, auth = null, autoIcons = false }) {
+export function createApp({ monitor, network, publicDir = path.join(root, 'public'), editor = true, iconsDir, downloadIcon, auth = null, autoIcons = false, update = null }) {
   const userIcons = iconsDir ?? (monitor.configPath ? path.join(path.dirname(monitor.configPath), 'icons') : null);
   const icons = () => iconVersions(publicDir, userIcons);
   const fetchIcons = autoIcons && userIcons ? createIconFetcher({ iconsDir: userIcons, download: downloadIcon, onIcon: forgetIcons }) : null;
@@ -164,7 +170,7 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
 
   return http.createServer((req, res) => {
     const isConfigApi = /^\/api\/config(\/|$)/.test(req.url ?? '');
-    const isAuthApi = auth != null && req.method === 'POST' && /^\/api\/(login|logout)$/.test(req.url ?? '');
+    const isAuthApi = auth != null && req.method === 'POST' && /^\/api\/(login|logout|password)$/.test(req.url ?? '');
     if (req.method !== 'GET' && req.method !== 'HEAD' && !(configApi && isConfigApi) && !isAuthApi) {
       res.writeHead(405, { allow: 'GET, HEAD', ...SECURITY_HEADERS });
       return res.end();
@@ -180,9 +186,26 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
 
     if (pathname === '/healthz') return json(res, 200, { ok: true });
 
-    // ---- password login (only when HUB_PASSWORD is set) ----
-    const loggedIn = auth ? auth.loggedIn(req) : false;
-    if (auth) {
+    // ---- password login (only once a password is set: HUB_PASSWORD, or on the page) ----
+    const authOn = auth?.enabled === true;
+    const loggedIn = authOn ? auth.loggedIn(req) : false;
+    if (auth && pathname === '/api/password' && req.method === 'POST') {
+      // set, change or remove the password from the page. Setting the first one needs no login (there
+      // is none yet: whoever can open the hub can already change everything); after that it does.
+      if (!fromOwnPage(req)) return json(res, 403, { error: 'Only accepted from the hub page itself.' });
+      if (authOn && !loggedIn) return json(res, 401, { error: 'Log in first.', login: true });
+      return void readBody(req).then(
+        (body) => {
+          const result = body?.remove === true ? auth.removePassword(req) : auth.setPassword(req, body?.password, body?.protects);
+          if (!result.ok) return json(res, 400, { error: result.error });
+          res.setHeader('set-cookie', result.cookie);
+          console.log(`[hub] password ${body?.remove === true ? 'removed' : 'set'} from the page`);
+          return json(res, 200, { ok: true });
+        },
+        (err) => json(res, err.status ?? 400, { error: err.message })
+      );
+    }
+    if (authOn) {
       if (pathname === '/api/login' && req.method === 'POST') {
         if (!fromOwnPage(req)) return json(res, 403, { error: 'Logins are only accepted from the hub page itself.' });
         return void readBody(req).then(
@@ -212,7 +235,7 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
         return res.end();
       }
     }
-    if (pathname === '/login') pathname = auth ? '/login.html' : '/';
+    if (pathname === '/login') pathname = authOn ? '/login.html' : '/';
 
     if (pathname === '/api/status') {
       const client = network ? network.detect(req) : { home: null, via: 'unknown', reason: 'Home detection is off', clientIp: null, serverIp: null };
@@ -223,12 +246,39 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
         const missing = snapshot.groups.flatMap((g) => g.services.map((s) => s.icon)).filter((name) => name && !known[name] && !known[name.toLowerCase()]);
         if (missing.length > 0) fetchIcons(missing).catch(() => {});
       }
-      return json(res, 200, { ...snapshot, client, icons: known, editor: configApi != null, auth: auth ? { mode: auth.mode, loggedIn } : null });
+      return json(res, 200, {
+        ...snapshot,
+        client,
+        icons: known,
+        editor: configApi != null,
+        // enabled: a password is set; canSet: one can be set or changed on the page (not with HUB_PASSWORD)
+        auth: auth ? { mode: auth.mode, loggedIn, enabled: authOn, canSet: auth.canSet } : null,
+        version: VERSION,
+        update: update?.available() ?? null
+      });
     }
     if (pathname === '/api/containers') return json(res, 200, monitor.containers());
     if (isAuthApi) return json(res, 404, { error: 'Not found' });
     if (pathname === '/api/config' || pathname.startsWith('/api/config/')) {
       if (!configApi) return json(res, 404, { error: 'The config editor is switched off (CONFIG_EDITOR=off).' });
+      // containers that publish a port and have no card yet, for the editor's "found on this server" list
+      if (pathname === '/api/config/suggestions' && (req.method === 'GET' || req.method === 'HEAD')) {
+        return json(res, 200, { suggestions: suggestServices(monitor.discovered ?? [], monitor.config), dockerError: monitor.dockerError ?? null });
+      }
+      // another dashboard's config file -> groups of cards (nothing is saved here)
+      if (pathname === '/api/config/import' && req.method === 'POST') {
+        if (!fromOwnPage(req)) return json(res, 403, { error: 'Changes are only accepted from the hub page itself.' });
+        return void readBody(req).then(
+          (body) => {
+            try {
+              return json(res, 200, importServices(body?.text ?? ''));
+            } catch (err) {
+              return json(res, 400, { error: err.message });
+            }
+          },
+          (err) => json(res, err.status ?? 400, { error: err.message })
+        );
+      }
       return void configApi(req, res, pathname, json);
     }
 
@@ -313,10 +363,17 @@ function main() {
   const port = Number(process.env.PORT ?? 8080);
   const editor = !['off', 'false', '0', 'no'].includes((process.env.CONFIG_EDITOR ?? '').toLowerCase());
   const off = (value) => ['off', 'false', '0', 'no'].includes(String(value ?? '').toLowerCase());
-  const auth = createAuth({ password: process.env.HUB_PASSWORD ?? '', protects: process.env.HUB_PASSWORD_PROTECTS ?? 'all' });
-  if (auth) console.log(`[hub] password login is on (protects: ${auth.mode === 'all' ? 'the whole page' : 'the config editor'})`);
-  else if (editor) console.log('[hub] no password set (HUB_PASSWORD): anyone who can reach this port can see the page and edit the config');
-  const server = createApp({ monitor, network, editor, auth, autoIcons: !off(process.env.ICON_DOWNLOAD) });
+  const auth = createAuth({
+    password: process.env.HUB_PASSWORD ?? '',
+    protects: process.env.HUB_PASSWORD_PROTECTS ?? 'all',
+    file: path.join(path.dirname(monitor.configPath), 'hub-auth.json') // a password set on the page
+  });
+  if (auth.enabled) console.log(`[hub] password login is on (protects: ${auth.mode === 'all' ? 'the whole page' : 'the config editor'})`);
+  else console.log('[hub] no password set: anyone who can reach this port can see the page and edit the config (set one in the gear menu, or HUB_PASSWORD)');
+  const update = off(process.env.UPDATE_CHECK) ? null : createUpdateChecker({ current: VERSION, repo: process.env.UPDATE_REPO || DEFAULT_REPO });
+  update?.start();
+  console.log(`[hub] version ${VERSION}`);
+  const server = createApp({ monitor, network, editor, auth, autoIcons: !off(process.env.ICON_DOWNLOAD), update });
   // HOST=:: also answers on IPv6 (the laptop preview sets it: "localhost" is tried on IPv6 first on Windows)
   const host = process.env.HOST ?? '0.0.0.0';
   server.listen(port, host, () => console.log(`[hub] listening on http://${host.includes(':') ? `[${host}]` : host}:${port}`));

@@ -3,13 +3,16 @@
 ## The easy way: the published image
 
 In TrueNAS: **Apps → Discover Apps → ⋮ → Install via YAML**, name **`homelab-hub`**, paste [compose.yaml](compose.yaml)
-and change two things:
+unchanged and save. Open `http://<nas>:8080` and follow the three steps on the page.
 
-- `./data:/config` → a dataset path, e.g. `/mnt/tank/appdata/homelab-hub:/config`
+Things you may want to change in the YAML (Apps → homelab-hub → **Edit**):
+
 - the port, if 8080 is taken (e.g. `"30082:8080"`)
-
-Save and open `http://<nas>:<port>`. The container fixes the owner of the config folder by itself. To update, pull the
-new image in the app's menu. To stay on one version, write it instead of `latest` in the image line (e.g. `:1.2.0`).
+- one mount line per pool for the storage tiles, e.g. `- /mnt/tank:/pools/tank:ro`
+- `hub-config:/config` → a dataset path such as `/mnt/tank/appdata/homelab-hub:/config`, if you want the config as
+  files in a dataset (for snapshots and replication) instead of in a Docker volume. The container fixes the owner of
+  that folder by itself. Do this before you set things up: a new folder starts with an empty config. To update, pull the
+new image in the app's menu. To stay on one version, write it instead of `latest` in the image line (e.g. `:1.3.0`).
 
 To show the stats of other machines too, run [compose.agent.yaml](compose.agent.yaml) on them (README, "Stats from
 other machines"). On a second TrueNAS box that is another custom app with that file. The rest of this page is only needed for the other way.
@@ -64,7 +67,7 @@ paste [compose.truenas.yaml](compose.truenas.yaml), Save. Open `http://192.168.1
 
 ## Editing the config on the NAS
 
-The easiest way is the editor on the page (gear menu → **Edit YAML**). By hand: the config folder is owned by the apps
+The easiest way is the editor on the page (gear menu → **Edit services and settings**). By hand: the config folder is owned by the apps
 user (568) and is not readable by a normal admin user over plain SSH or SMB, so edit it with sudo:
 
 ```bash

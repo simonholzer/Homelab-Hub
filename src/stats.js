@@ -160,7 +160,7 @@ export class StatsReader {
         if (d.sizeBytes && d.sizeBytes >= entry.freeBytes) entry.totalBytes = d.sizeBytes;
         out.push(entry);
       } catch (err) {
-        out.push({ name: d.name, error: err.code ?? 'unreadable' });
+        out.push({ name: d.name, path: d.path, error: err.code ?? 'unreadable' });
       }
     }
     return out;

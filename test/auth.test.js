@@ -67,7 +67,7 @@ test('a wrong password is refused, the right one gives a cookie that opens the h
 
     const status = await fetch(`${base}/api/status`, { headers: { cookie } });
     assert.equal(status.status, 200);
-    assert.deepEqual((await status.json()).auth, { mode: 'all', loggedIn: true });
+    assert.deepEqual((await status.json()).auth, { mode: 'all', loggedIn: true, enabled: true, canSet: false });
     assert.equal((await fetch(`${base}/`, { headers: { cookie }, redirect: 'manual' })).status, 200);
 
     // a made-up or tampered cookie is worth nothing
@@ -91,7 +91,7 @@ test('protects only the editor: the page is open, the config needs the login', a
   await withHub({ password: TEST_PASSWORD, protects: 'editor' }, async (base) => {
     assert.equal((await fetch(`${base}/`)).status, 200);
     const status = await (await fetch(`${base}/api/status`)).json();
-    assert.deepEqual(status.auth, { mode: 'editor', loggedIn: false });
+    assert.deepEqual(status.auth, { mode: 'editor', loggedIn: false, enabled: true, canSet: false });
     assert.equal((await fetch(`${base}/api/config`)).status, 401);
     const cookie = cookieFrom(await login(base, TEST_PASSWORD));
     assert.equal((await fetch(`${base}/api/config`, { headers: { cookie } })).status, 200);

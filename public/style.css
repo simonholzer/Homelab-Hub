@@ -329,6 +329,61 @@ button.stats-title[aria-expanded="false"] .chev { transform: rotate(-90deg); }
 .pin:focus-visible { outline: 2px solid var(--accent); }
 @media (hover: none) { .pin { opacity: 0.7; } }
 .group.pinned h2 { color: var(--accent); }
+/* the pencil next to the pin: opens this card in the editor */
+.pin.edit { right: 38px; }
+.pin.edit svg { transform: none; }
+.cardwrap.editable .card .meta { padding-right: 56px; }
+/* the pencil at the end of a group's heading */
+.group h2 { display: flex; align-items: center; gap: 6px; }
+.group h2 .grouphead { flex: 1; min-width: 0; }
+.gedit { display: grid; place-items: center; flex: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
+.gedit svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.group h2:hover .gedit, .gedit:focus-visible { opacity: 1; }
+.gedit:hover { background: var(--panel-hover); color: var(--text); }
+.gedit:focus-visible { outline: 2px solid var(--accent); }
+@media (hover: none) { .gedit { opacity: 0.7; } }
+
+/* ---- compact cards (gear menu): more per row, one line each ---- */
+body.compact .cards { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+body.compact .card { padding: 9px 12px; gap: 6px; }
+body.compact .card .icon { width: 24px; height: 24px; }
+body.compact .card .meta, body.compact .card .desc, body.compact .card .tag, body.compact .card .problem { display: none; }
+body.compact .card .pill { font-size: 0; gap: 0; }
+body.compact .pin { top: 50%; bottom: auto; margin-top: -12px; right: 4px; background: var(--panel); }
+body.compact .pin.edit { right: 30px; }
+body.compact .cardwrap:not(:hover) .pin:not(.on) { opacity: 0; }
+
+/* ---- first-start guide ---- */
+.guide { margin-bottom: 26px; padding: 16px 18px 18px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.guide[hidden] { display: none; }
+.guide-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.guide h2 { margin: 0; font-size: 1rem; font-weight: 650; }
+.guide-hide { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 0.8rem; cursor: pointer; text-decoration: underline; }
+.guide ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.guide li { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); counter-increment: step; }
+.guide li strong::before { content: counter(step) ". "; color: var(--accent); }
+.guide li span { flex: 1; color: var(--muted); font-size: 0.84rem; }
+.guide li .set-btn { margin-top: 6px; }
+
+/* ---- password dialog ---- */
+.pw { width: min(380px, calc(100vw - 28px)); padding: 0; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel); color: var(--text); }
+.pw::backdrop { background: rgba(0, 0, 0, 0.6); }
+.pw-form { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; }
+.pw-form h2 { margin: 0; font-size: 1.05rem; }
+.pw-form label { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 0.8rem; }
+.pw-form input, .pw-form select { padding: 9px 11px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 16px; }
+.pw-form input:focus-visible, .pw-form select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pw-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.pw-buttons button { padding: 8px 14px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel-hover); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+.pw-buttons .primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.pw-buttons .danger { margin-right: auto; color: var(--down); }
+
+/* a newer version exists: a dot on the gear, a link in its menu */
+.gear.has-update { position: relative; }
+.gear.has-update::after { content: ""; position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.set-note.version { margin-top: 12px; }
+.set-note.version a { color: var(--accent); }
+.banner button + button { margin-left: 6px; }
 
 /* servers can be opened and closed: the heading is a button */
 .group h2 { margin: 0 0 12px; }

@@ -1,14 +1,12 @@
 # Homelab Hub on any Docker host. No clone, no build:
 #   1. save this file as compose.yaml
 #   2. docker compose up -d
-#   3. open http://<server>:8080  and edit the config on the page (gear menu -> Edit YAML)
-# The config lives in ./data/services.yaml (created on the first start).
+#   3. open http://<server>:8080  and follow the three steps on the page
 #
-# TrueNAS: paste this file under Apps -> Discover Apps -> ⋮ -> Install via YAML and replace
-# ./data with a dataset path (e.g. /mnt/tank/appdata/homelab-hub). More in DEPLOY.md.
+# TrueNAS: paste this file under Apps -> Discover Apps -> ⋮ -> Install via YAML. More in DEPLOY.md.
 services:
   homelab-hub:
-    image: ghcr.io/simonholzer/homelab-hub:latest   # or a fixed version, e.g. :1.2.0
+    image: ghcr.io/simonholzer/homelab-hub:latest   # or a fixed version, e.g. :1.3.0
     # build: .                  # instead of `image:` to build from a clone of the repository
     restart: unless-stopped
     depends_on:
@@ -16,11 +14,14 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/config
+      # The config (services.yaml, added icons, backups, a password set on the page) lives in a Docker
+      # volume: it survives updates and needs no folder or permissions. To have it as a folder you can
+      # see instead, replace "hub-config" here with a path, e.g. ./data or /mnt/tank/appdata/homelab-hub
+      - hub-config:/config
       - /proc:/host/proc:ro     # server stats (CPU, memory, load, uptime)
       - /sys:/host/sys:ro       # CPU temperature, network cards
       # Free space per disk or pool (statfs only; the hub never reads files from these).
-      # One line per storage tile in services.yaml (stats.disks):
+      # One line per storage tile; the right-hand path is what you enter for the tile on the page:
       # - /mnt/tank:/pools/tank:ro
       # - /mnt/backup:/pools/backup:ro
     environment:
@@ -28,12 +29,13 @@ services:
       PROC_PATH: /host/proc
       SYS_PATH: /host/sys
       TZ: "Etc/UTC"                     # your time zone, e.g. Europe/Berlin
-      # PUID: "1000"                    # the user the hub runs as and that owns ./data
+      # PUID: "1000"                    # the user the hub runs as (and that owns a config folder)
       # PGID: "1000"
-      # HUB_PASSWORD: "change-me"       # switch on the login (without it: no login at all)
-      # HUB_PASSWORD_PROTECTS: "editor" # login only for the config editor; default "all" = the whole page
-      # CONFIG_EDITOR: "off"            # no config editor on the page
+      # HUB_PASSWORD: "change-me"       # a fixed password (otherwise: set one on the page, gear menu)
+      # HUB_PASSWORD_PROTECTS: "editor" # login only for the editor; default "all" = the whole page
+      # CONFIG_EDITOR: "off"            # no editor on the page
       # ICON_DOWNLOAD: "off"            # never fetch missing icons from dashboard-icons
+      # UPDATE_CHECK: "off"             # never ask GitHub whether a newer version exists
 
   # Read-only window onto Docker: only "list containers" is allowed (CONTAINERS=1).
   # Everything else (start/stop/exec/create ...) is refused by the proxy, so the hub
@@ -45,3 +47,6 @@ services:
       CONTAINERS: "1"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  hub-config:
