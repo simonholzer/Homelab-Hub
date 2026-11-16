@@ -1,0 +1,161 @@
+# Homelab Hub: everything you can edit lives in this file.
+# The page re-reads it every check cycle (about 30 s), no restart needed.
+# If you make a mistake, the page keeps the last working version and shows what is wrong.
+#
+# This is the EXAMPLE config. In Docker it is copied to /config/services.yaml on the first
+# start; from then on you edit that copy (or use the editor on the page: gear menu -> Edit YAML).
+# Replace the addresses, domain (example.com) and services with your own.
+
+title: Homelab Hub
+subtitle: example.com
+
+settings:
+  checkIntervalSeconds: 30   # how often every service and container is checked (5 to 3600)
+  statsIntervalSeconds: 5    # how often CPU, memory, load, network and storage are measured (1 to 3600)
+  timeoutSeconds: 4          # a check that takes longer counts as offline (1 to 30)
+  home:
+    # On the home network, cards open their `local:` address instead of going through Cloudflare.
+    # The hub decides per visit: opened directly on the LAN = home; opened through Cloudflare = home
+    # when your public IP is the server's public IP. If that is wrong for you (second internet line, VPN),
+    # list extra public IPs here, or use the Auto / Home / Away switch at the top of the page.
+    publicIps: []
+
+# Address shortcuts. Use them as {nas} / {pi} in url: and check: below.
+# Moving a machine to a new IP = change one line here.
+hosts:
+  nas: 192.168.1.10          # the server the hub runs on
+  pi: 192.168.1.20           # a second machine, e.g. a Raspberry Pi
+  mc: 192.168.1.30           # a game server
+
+# Server stats. Needs the /proc mount from compose.yaml; otherwise the panel is hidden.
+stats:
+  name: NAS                    # caption above the stats tiles (optional)
+  # network: [eno1]            # cards for the network speed tile (default: all physical cards)
+  disks:
+    # One tile per pool or disk. The paths are folders mounted read-only into the container by
+    # compose.yaml (/mnt/<pool> -> /pools/<pool>). The free space is read live. A container can't read
+    # a ZFS pool's total size (a ZFS top folder only knows its own data), so `size:` is a number you set:
+    # it gives the "used / total" and the bar. Without `size:` the tile shows only the free space.
+    # Get the numbers on a ZFS host with:  zfs list -Hp -o name,used,avail -d 0   (size = used + avail)
+    # They only change if a pool is expanded.
+    - name: tank
+      path: /pools/tank
+      size: 3.6T
+    - name: backup
+      path: /pools/backup
+      size: 1.8T
+
+# ---------------------------------------------------------------------------------------------
+# One entry per web UI:
+#   name         shown on the card
+#   url          public address the card links to (through Cloudflare). Optional if `local` is set.
+#   local        address used instead when you are on the home network (optional)
+#   icon         name of a file in public/icons (without .svg), e.g. immich. Without one, or if the
+#                file doesn't exist, a default icon is shown. Icons come from the open
+#                "dashboard-icons" set (https://github.com/homarr-labs/dashboard-icons).
+#   check        what decides the green/red dot (optional)
+#                  http://{nas}:2283    open web address; any answer below 500 = online
+#                  tcp://{pi}:22        only test that the port accepts connections
+#                  none                 no dot (grey)
+#                If left out, `url` is checked. That is only meaningful for addresses that are NOT
+#                behind Cloudflare Access: Access answers with its login page even when the service
+#                is dead, so such cards show a grey "unknown" dot. Point `check` at the real
+#                address (server IP and port) instead; the ports are in the Cloudflare tunnel routes.
+#   insecure     true = accept a self-signed certificate on the check (Cockpit, Portainer)
+#   containers   Docker containers whose health to show (optional, only for important ones).
+#                Patterns with * match the container name, compose project or service name.
+#                See what exists:  /api/containers  (link in the page footer)
+#                A group with `autoContainers: true` does this by itself for every card, matching the
+#                card's name (Uptime Kuma -> *uptime-kuma*); cards without a container simply get no badge.
+#   hidden       true = keep the entry here but don't show it
+# ---------------------------------------------------------------------------------------------
+groups:
+  - name: NAS
+    autoContainers: true       # every card here gets a health badge when a Docker container matches its name
+    services:
+      - name: TrueNAS
+        icon: truenas
+        url: https://nas.example.com
+        check: http://{nas}:80
+        local: http://{nas}:80
+
+      - name: Immich
+        icon: immich
+        url: https://photos.example.com
+        check: http://{nas}:2283
+        local: http://{nas}:2283
+
+      - name: Jellyfin
+        icon: jellyfin
+        url: https://media.example.com
+        check: http://{nas}:8096
+        local: http://{nas}:8096
+
+      - name: n8n
+        icon: n8n
+        url: https://n8n.example.com
+        check: http://{nas}:5678
+        local: http://{nas}:5678
+
+      - name: Homarr
+        icon: homarr
+        url: https://homarr.example.com
+        check: http://{nas}:7575
+        local: http://{nas}:7575
+
+      # Services with no tunnel (reachable only at home) need just `local:`, no `url:`.
+      # Away from home they appear greyed out as "home network only".
+      - name: Portainer
+        icon: portainer
+        local: https://{nas}:9443           # speaks only https with its own certificate
+        insecure: true
+
+      - name: Open WebUI
+        icon: open-webui
+        local: http://{nas}:3000
+
+      - name: Syncthing
+        icon: syncthing
+        local: http://{nas}:8384
+
+      - name: Uptime Kuma
+        icon: uptime-kuma
+        local: http://{nas}:3001
+        check: http://{nas}:3001
+
+      # An entry you want to keep but not show:
+      # - name: MeTube
+      #   icon: metube
+      #   local: http://{nas}:8081
+      #   hidden: true
+
+  # A separate machine on the home network with NO public route: its cards have only `local:`.
+  # Away from home they stay greyed out but still show online/offline, because the hub checks
+  # them from the server it runs on.
+  - name: Game Server
+    services:
+      - name: AMP
+        icon: minecraft
+        local: http://{mc}:8080
+        check: http://{mc}:8080
+
+      - name: BlueMap
+        icon: bluemap
+        local: http://{mc}:8100
+        check: http://{mc}:8100
+
+  - name: Raspberry Pi
+    services:
+      - name: Cockpit
+        icon: cockpit
+        url: https://cockpit.example.com
+        check: https://{pi}:9090
+        insecure: true
+
+      - name: Browser SSH
+        icon: terminal
+        url: https://ssh.example.com
+        check: tcp://{pi}:22                   # SSH is not a web page: only test the port
+
+      - name: Status page
+        url: https://status.example.com        # no Cloudflare login, so the public address is checked

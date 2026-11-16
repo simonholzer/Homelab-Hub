@@ -1,0 +1,44 @@
+# Homelab Hub on any Docker host:
+#   mkdir -p data && sudo chown 1000:1000 data     # the container runs as user 1000 (see `user:` below)
+#   docker compose up -d --build
+# Then open http://<server>:8080. The config you edit afterwards is ./data/services.yaml
+# (created from config/services.yaml on the first start).
+#
+# TrueNAS users: see compose.truenas.yaml and DEPLOY.md.
+services:
+  homelab-hub:
+    build: .
+    image: homelab-hub:latest
+    restart: unless-stopped
+    user: "1000:1000"           # must own ./data
+    depends_on:
+      - docker-proxy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/config
+      - /proc:/host/proc:ro     # server stats (CPU, memory, load, uptime)
+      - /sys:/host/sys:ro       # CPU temperature, network cards
+      # Free space per disk or pool (statfs only; the hub never reads files from these).
+      # One line per storage tile in services.yaml (stats.disks):
+      # - /mnt/tank:/pools/tank:ro
+      # - /mnt/backup:/pools/backup:ro
+    environment:
+      CONFIG_PATH: /config/services.yaml
+      DEFAULT_CONFIG_PATH: /app/config/services.yaml
+      DOCKER_HOST: http://docker-proxy:2375
+      PROC_PATH: /host/proc
+      SYS_PATH: /host/sys
+      TZ: "Etc/UTC"             # your time zone, e.g. Europe/Berlin
+      # CONFIG_EDITOR: "off"    # switch off the config editor on the page
+
+  # Read-only window onto Docker: only "list containers" is allowed (CONTAINERS=1).
+  # Everything else (start/stop/exec/create ...) is refused by the proxy, so the hub
+  # never gets the powers of the raw Docker socket.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro

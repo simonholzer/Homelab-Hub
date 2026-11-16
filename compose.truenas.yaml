@@ -1,0 +1,44 @@
+# TrueNAS (25.04 or newer): Apps -> Discover Apps -> ⋮ -> "Install via YAML", name: homelab-hub
+#
+# The image is built on the NAS (no registry), see DEPLOY.md:
+#   1. your computer:  bash scripts/deploy-copy.sh
+#   2. your computer:  ssh -t nas "sudo bash ~/homelab-hub/scripts/nas-build.sh"
+#   3. TrueNAS:        Apps -> homelab-hub -> Restart (only for updates)
+# The config you edit afterwards is  /mnt/tank/appdata/homelab-hub/services.yaml
+# Replace "tank" / "backup" with the names of your pools.
+services:
+  homelab-hub:
+    image: homelab-hub:latest
+    pull_policy: never          # image exists only locally on the NAS
+    restart: unless-stopped
+    user: "568:568"             # TrueNAS "apps" user; owns the config folder
+    depends_on:
+      - docker-proxy
+    ports:
+      - "30082:8080"            # pick any free port
+    volumes:
+      - /mnt/tank/appdata/homelab-hub:/config
+      - /proc:/host/proc:ro     # server stats (CPU, memory, load, uptime)
+      - /sys:/host/sys:ro       # CPU temperature, network cards
+      # free space per pool (statfs only; the hub never reads files from these)
+      - /mnt/tank:/pools/tank:ro
+      - /mnt/backup:/pools/backup:ro
+      # - /boot/grub:/pools/boot-pool:ro   # the boot pool's dataset (boot-pool/grub): its free space is the pool's
+    environment:
+      CONFIG_PATH: /config/services.yaml
+      DEFAULT_CONFIG_PATH: /app/config/services.yaml
+      DOCKER_HOST: http://docker-proxy:2375
+      PROC_PATH: /host/proc
+      SYS_PATH: /host/sys
+      TZ: "Etc/UTC"             # your time zone, e.g. Europe/Berlin
+
+  # Read-only window onto Docker: only "list containers" is allowed (CONTAINERS=1).
+  # Everything else (start/stop/exec/create ...) is refused by the proxy, so the hub
+  # never gets the powers of the raw Docker socket.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro

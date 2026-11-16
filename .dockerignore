@@ -1,0 +1,14 @@
+**/node_modules
+.git
+.gitignore
+.claude
+*.log
+.env
+test
+scripts
+Dockerfile
+compose*.yaml
+*.md
+data
+.github
+assets

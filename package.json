@@ -1,0 +1,20 @@
+{
+  "name": "homelab-hub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted link page for a homelab: every web UI with an online/offline dot, Docker container health and server stats. Config is one YAML file.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "local": "node scripts/run-local.mjs",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "yaml": "^2.8.0"
+  }
+}
