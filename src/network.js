@@ -1,11 +1,14 @@
 // "Am I on the home network?" decided on the server, per request.
 //
-//   1. A request that did NOT come through Cloudflare (no CF-Connecting-IP header) and whose
+//   1. A request that did NOT come through a proxy (no visitor-address header) and whose
 //      peer is a private/loopback address was made directly on the LAN  ->  home.
-//      (Requests through the tunnel also have a private peer, cloudflared, so the header, not
-//      the peer, tells the two apart. X-Forwarded-For is ignored on purpose.)
-//   2. A request through Cloudflare is "home" when the visitor's public IP equals the NAS's own
-//      public IP (looked up via Cloudflare's trace page) or one listed in settings.home.publicIps.
+//      (Requests through a tunnel or proxy also have a private peer, so the header, not the peer,
+//      tells the two apart.) The header is Cloudflare's CF-Connecting-IP, plus the one named in
+//      settings.home.clientIpHeader for other reverse proxies (x-forwarded-for, x-real-ip).
+//      X-Forwarded-For is ignored unless it is named there.
+//   2. A request through a proxy is "home" when the visitor's address is a private one (a proxy
+//      on the LAN), or when the visitor's public IP equals the server's own public IP (looked up
+//      via Cloudflare's trace page) or one listed in settings.home.publicIps.
 //   3. Anything else is "away". The page also has a manual Auto / Home / Away switch, because
 //      public-IP matching can be wrong (VPN, a second internet line, IPv6).
 //
@@ -70,7 +73,8 @@ export class HomeNetwork {
    * @param {() => string[]} [o.getExtraIps]    extra "home" IPs from the YAML (read on every request)
    * @param {number} [o.intervalMs]
    */
-  constructor({ lookup = lookupPublicIp, getExtraIps = () => [], getRunsAtHome = () => true, intervalMs = 10 * 60 * 1000 } = {}) {
+  constructor({ lookup = lookupPublicIp, getExtraIps = () => [], getRunsAtHome = () => true, getClientIpHeader = () => '', intervalMs = 10 * 60 * 1000 } = {}) {
+    this.getClientIpHeader = getClientIpHeader;
     this.lookup = lookup;
     this.getExtraIps = getExtraIps;
     this.getRunsAtHome = getRunsAtHome;
@@ -103,13 +107,17 @@ export class HomeNetwork {
   detect(req) {
     const serverIp = this.publicIp;
     const runsAtHome = this.getRunsAtHome();
-    const cf = req.headers['cf-connecting-ip'];
+    const extraHeader = this.getClientIpHeader();
+    const cf = req.headers['cf-connecting-ip'] ?? (extraHeader ? req.headers[extraHeader] : undefined);
     if (cf) {
       const clientIp = normalizeIp(String(cf).split(',')[0]);
+      if (isPrivateAddress(clientIp) && runsAtHome) {
+        return { home: true, via: 'proxy-lan', clientIp, serverIp, reason: 'You reached the hub through a proxy from an address on the home network' };
+      }
       // When the hub itself is not at home (laptop preview), its own public IP says nothing about home.
       const known = [runsAtHome ? serverIp : null, ...this.getExtraIps()].filter(Boolean);
       if (known.length === 0) {
-        return { home: null, via: 'unknown', clientIp, serverIp, reason: "Reached through Cloudflare, and the hub doesn't know the NAS's public address yet" + (this.lookupError ? ` (${this.lookupError})` : '') };
+        return { home: null, via: 'unknown', clientIp, serverIp, reason: "Reached through a proxy, and the hub doesn't know the server's public address yet" + (this.lookupError ? ` (${this.lookupError})` : '') };
       }
       const home = known.some((ip) => samePublicAddress(clientIp, ip));
       return {
@@ -118,8 +126,8 @@ export class HomeNetwork {
         clientIp,
         serverIp,
         reason: home
-          ? `Your public IP (${clientIp}) is the NAS's: you are on the home network`
-          : `Your public IP (${clientIp}) differs from the NAS's (${known.join(', ')}). If you are at home, use the switch, or add your IP under settings.home.publicIps`
+          ? `Your public IP (${clientIp}) is the server's: you are on the home network`
+          : `Your public IP (${clientIp}) differs from the server's (${known.join(', ')}). If you are at home, use the switch, or add your IP under settings.home.publicIps`
       };
     }
     const peer = normalizeIp(req.socket?.remoteAddress);

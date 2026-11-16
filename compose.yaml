@@ -1,16 +1,16 @@
-# Homelab Hub on any Docker host:
-#   mkdir -p data && sudo chown 1000:1000 data     # the container runs as user 1000 (see `user:` below)
-#   docker compose up -d --build
-# Then open http://<server>:8080. The config you edit afterwards is ./data/services.yaml
-# (created from config/services.yaml on the first start).
+# Homelab Hub on any Docker host. No clone, no build:
+#   1. save this file as compose.yaml
+#   2. docker compose up -d
+#   3. open http://<server>:8080  and edit the config on the page (gear menu -> Edit YAML)
+# The config lives in ./data/services.yaml (created on the first start).
 #
-# TrueNAS users: see compose.truenas.yaml and DEPLOY.md.
+# TrueNAS: paste this file under Apps -> Discover Apps -> ⋮ -> Install via YAML and replace
+# ./data with a dataset path (e.g. /mnt/tank/appdata/homelab-hub). More in DEPLOY.md.
 services:
   homelab-hub:
-    build: .
-    image: homelab-hub:latest
+    image: ghcr.io/your-username/homelab-hub:latest
+    # build: .                  # instead of `image:` to build from a clone of the repository
     restart: unless-stopped
-    user: "1000:1000"           # must own ./data
     depends_on:
       - docker-proxy
     ports:
@@ -24,13 +24,16 @@ services:
       # - /mnt/tank:/pools/tank:ro
       # - /mnt/backup:/pools/backup:ro
     environment:
-      CONFIG_PATH: /config/services.yaml
-      DEFAULT_CONFIG_PATH: /app/config/services.yaml
       DOCKER_HOST: http://docker-proxy:2375
       PROC_PATH: /host/proc
       SYS_PATH: /host/sys
-      TZ: "Etc/UTC"             # your time zone, e.g. Europe/Berlin
-      # CONFIG_EDITOR: "off"    # switch off the config editor on the page
+      TZ: "Etc/UTC"                     # your time zone, e.g. Europe/Berlin
+      # PUID: "1000"                    # the user the hub runs as and that owns ./data
+      # PGID: "1000"
+      # HUB_PASSWORD: "change-me"       # switch on the login (without it: no login at all)
+      # HUB_PASSWORD_PROTECTS: "editor" # login only for the config editor; default "all" = the whole page
+      # CONFIG_EDITOR: "off"            # no config editor on the page
+      # ICON_DOWNLOAD: "off"            # never fetch missing icons from dashboard-icons
 
   # Read-only window onto Docker: only "list containers" is allowed (CONTAINERS=1).
   # Everything else (start/stop/exec/create ...) is refused by the proxy, so the hub

@@ -25,12 +25,11 @@ services:
       - /mnt/backup:/pools/backup:ro
       # - /boot/grub:/pools/boot-pool:ro   # the boot pool's dataset (boot-pool/grub): its free space is the pool's
     environment:
-      CONFIG_PATH: /config/services.yaml
-      DEFAULT_CONFIG_PATH: /app/config/services.yaml
       DOCKER_HOST: http://docker-proxy:2375
       PROC_PATH: /host/proc
       SYS_PATH: /host/sys
       TZ: "Etc/UTC"             # your time zone, e.g. Europe/Berlin
+      # HUB_PASSWORD: "change-me"       # switch on the login (see README)
 
   # Read-only window onto Docker: only "list containers" is allowed (CONTAINERS=1).
   # Everything else (start/stop/exec/create ...) is refused by the proxy, so the hub

@@ -1,7 +1,7 @@
 // Polls everything on a timer and keeps the latest result in memory.
 // The web page only ever reads the cached snapshot, so many open tabs cost nothing.
 import fs from 'node:fs';
-import { parseConfigText, ensureConfigFile, DEFAULT_SETTINGS } from './config.js';
+import { parseConfigText, ensureConfigFile, servicesFromLabels, DEFAULT_SETTINGS } from './config.js';
 import { runCheck } from './checks.js';
 import { listContainers, summarizeContainers, autoContainerPatterns } from './docker.js';
 import { StatsReader } from './stats.js';
@@ -43,6 +43,8 @@ export class Monitor {
     this.results = new Map(); // service id -> {status, detail, code, ms, checkedAt}
     this.containerSummary = new Map(); // service id -> summary
     this.discovered = [];
+    this.labelGroups = []; // cards made from Docker labels: [{name, services}]
+    this.labelErrors = [];
     this.stats = null;
     this.statsError = null;
     this.statsAt = null;
@@ -76,7 +78,7 @@ export class Monitor {
       this.configLoadedAt = Date.now();
       // forget results of services that no longer exist
       const ids = new Set(config.groups.flatMap((g) => g.services.map((s) => s.id)));
-      for (const id of [...this.results.keys()]) if (!ids.has(id)) this.results.delete(id);
+      for (const id of [...this.results.keys()]) if (!ids.has(id) && !id.startsWith('d:')) this.results.delete(id);
       console.log(`[config] loaded ${file}: ${ids.size} services`);
     } else {
       this.configError = {
@@ -89,13 +91,27 @@ export class Monitor {
     }
   }
 
+  /** The groups of the YAML plus the cards made from Docker labels (added to the group of the same name, or as new groups). */
+  groups() {
+    const { config } = this;
+    if (this.labelGroups.length === 0) return config.groups;
+    const out = config.groups.map((g) => ({ ...g, services: [...g.services] }));
+    for (const lg of this.labelGroups) {
+      const own = out.find((g) => g.name === lg.name);
+      // a card the YAML already has (same name in the same group) wins over the label
+      const fresh = lg.services.filter((s) => !own?.services.some((x) => x.name === s.name));
+      if (own) own.services.push(...fresh);
+      else out.push({ id: `d:${lg.name}`, name: lg.name, icon: '', services: fresh });
+    }
+    return out;
+  }
+
   async tick() {
     this.reloadConfig();
     const { config } = this;
     const timeoutMs = config.settings.timeoutSeconds * 1000;
-    const services = config.groups.flatMap((g) => g.services);
 
-    const wantsContainers = services.some((s) => s.containers.length > 0 || s.autoContainers);
+    const wantsContainers = config.groups.some((g) => g.services.some((s) => s.containers.length > 0 || s.autoContainers));
     const containersPromise =
       wantsContainers || this.dockerHost
         ? this.listContainers().then(
@@ -107,6 +123,20 @@ export class Monitor {
     // (tests, or one tick on its own) the stats are read here, once per cycle.
     const statsPromise = this.statsTimer ? Promise.resolve() : this.refreshStats();
 
+    // Docker first: its labels can add cards, which are then checked like the others.
+    const docker = await containersPromise;
+    if (docker.list && config.settings.dockerLabels !== false) {
+      const made = servicesFromLabels(docker.list, config);
+      this.labelGroups = made.groups;
+      this.labelErrors = made.errors;
+    } else if (docker.list || config.settings.dockerLabels === false) {
+      this.labelGroups = [];
+      this.labelErrors = [];
+    } // Docker unreachable: keep the cards from the last good answer
+    const services = this.groups().flatMap((g) => g.services);
+    const labelIds = new Set(services.filter((s) => s.fromDocker).map((s) => s.id));
+    for (const id of [...this.results.keys()]) if (id.startsWith('d:') && !labelIds.has(id)) this.results.delete(id);
+
     await Promise.all(
       services.map(async (svc) => {
         const result = await this.check(svc.check, timeoutMs);
@@ -114,7 +144,6 @@ export class Monitor {
       })
     );
 
-    const docker = await containersPromise;
     if (docker.list) {
       this.discovered = docker.list;
       this.dockerError = null;
@@ -163,7 +192,7 @@ export class Monitor {
     let up = 0;
     let down = 0;
     let unknown = 0;
-    const groups = config.groups.map((g) => ({
+    const groups = this.groups().map((g) => ({
       id: g.id,
       name: g.name,
       icon: g.icon,
@@ -190,7 +219,8 @@ export class Monitor {
           ms: r?.ms ?? null,
           checkedAt: r?.checkedAt ?? null,
           watchContainers: showBadge,
-          containers: c
+          containers: c,
+          ...(s.fromDocker ? { fromDocker: true } : {})
         };
       })
     }));
@@ -199,6 +229,7 @@ export class Monitor {
       subtitle: config.subtitle,
       generatedAt: Date.now(),
       checkedAt: this.checkedAt,
+      language: config.settings.language ?? 'auto',
       checkIntervalSeconds: config.settings.checkIntervalSeconds,
       statsIntervalSeconds: config.settings.statsIntervalSeconds,
       statsAt: this.statsAt ?? null,
@@ -215,7 +246,7 @@ export class Monitor {
 
   /** Containers Docker reports, for fixing `containers:` patterns in the YAML. */
   containers() {
-    return { error: this.dockerError, containers: this.discovered };
+    return { error: this.dockerError, labelErrors: this.labelErrors, containers: this.discovered };
   }
 
   start() {

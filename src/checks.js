@@ -1,8 +1,9 @@
 // Availability checks: HTTP(S) and TCP.
 //
-// Important: a service behind Cloudflare Access answers with a 302 to the login page
-// even when its origin is dead. So a redirect to *.cloudflareaccess.com is reported as
-// "unknown" (not green). Real checks should point at the origin (http://NAS-IP:port).
+// Important: a service behind a login proxy (Cloudflare Access, Authelia, Authentik, ...) answers
+// with a redirect to the login page even when the service itself is dead. So a redirect to
+// *.cloudflareaccess.com, or to one of the hosts listed under settings.loginHosts, is reported as
+// "unknown" (not green). Real checks should point at the service itself (http://server-ip:port).
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -10,7 +11,7 @@ import net from 'node:net';
 const USER_AGENT = 'homelab-hub/1.0 (status check)';
 
 /** Decides what an HTTP answer means. Exported for tests. */
-export function classifyResponse(code, location) {
+export function classifyResponse(code, location, loginHosts = []) {
   if (code >= 500) return { status: 'down', detail: `HTTP ${code}` };
   if (code >= 300 && code < 400 && location) {
     let host = '';
@@ -19,8 +20,8 @@ export function classifyResponse(code, location) {
     } catch {
       // not a valid URL: treat as an ordinary redirect
     }
-    if (host === 'cloudflareaccess.com' || host.endsWith('.cloudflareaccess.com')) {
-      return { status: 'unknown', detail: 'Behind Cloudflare login: set a direct check (http://NAS-IP:port)' };
+    if (host === 'cloudflareaccess.com' || host.endsWith('.cloudflareaccess.com') || (host && loginHosts.includes(host))) {
+      return { status: 'unknown', detail: 'Behind a login page: set a direct check (http://server-ip:port)' };
     }
   }
   return { status: 'up', detail: `HTTP ${code}` };
@@ -37,7 +38,7 @@ function describeError(err) {
   return code || err.message || 'Failed';
 }
 
-export function probeHttp({ url, insecure = false, timeoutMs = 4000 }) {
+export function probeHttp({ url, insecure = false, timeoutMs = 4000, loginHosts = [] }) {
   return new Promise((resolve) => {
     const started = performance.now();
     let settled = false;
@@ -64,7 +65,7 @@ export function probeHttp({ url, insecure = false, timeoutMs = 4000 }) {
           headers: { 'user-agent': USER_AGENT, accept: '*/*' }
         },
         (res) => {
-          const result = classifyResponse(res.statusCode ?? 0, res.headers.location);
+          const result = classifyResponse(res.statusCode ?? 0, res.headers.location, loginHosts);
           res.destroy(); // headers are enough, don't download the body
           finish({ ...result, code: res.statusCode });
         }
@@ -99,5 +100,5 @@ export function probeTcp({ host, port, timeoutMs = 4000 }) {
 export function runCheck(check, timeoutMs) {
   if (!check) return Promise.resolve({ status: 'unknown', detail: 'No check configured', ms: null });
   if (check.type === 'tcp') return probeTcp({ host: check.host, port: check.port, timeoutMs });
-  return probeHttp({ url: check.url, insecure: check.insecure, timeoutMs });
+  return probeHttp({ url: check.url, insecure: check.insecure, timeoutMs, loginHosts: check.loginHosts });
 }

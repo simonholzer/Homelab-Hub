@@ -68,7 +68,7 @@ test('redirects are not followed; a redirect to the Cloudflare login is "unknown
   assert.deepEqual([plain.status, plain.code], ['up', 302]);
   const login = await probeHttp({ url: base + '/cf-login', timeoutMs: 2000 });
   assert.equal(login.status, 'unknown');
-  assert.match(login.detail, /Cloudflare login/);
+  assert.match(login.detail, /login page/);
 });
 
 test('a server that never answers times out', async () => {

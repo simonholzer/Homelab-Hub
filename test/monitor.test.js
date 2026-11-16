@@ -81,7 +81,7 @@ test('a broken edit keeps the last good config and reports the errors; fixing it
 });
 
 test('a broken config on first start shows the error and no services', async () => {
-  const { file } = tmpConfig('title: nothing else');
+  const { file } = tmpConfig('groups: nothing useful');
   const m = new Monitor({ configPath: file, check: fakeCheck, statsReader: fakeStats });
   await m.tick();
   const snap = m.snapshot();

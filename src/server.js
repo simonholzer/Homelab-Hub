@@ -1,5 +1,6 @@
-// HTTP server: static page + JSON API. No login of its own: it is meant to sit behind
-// Cloudflare Access (and be reachable on the LAN port at home).
+// HTTP server: static page + JSON API. A password login is optional (HUB_PASSWORD, see auth.js);
+// without it the hub is meant to sit behind something that authenticates (Cloudflare Access,
+// Authelia, a VPN) or to stay on the home network.
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -8,7 +9,9 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { Monitor } from './monitor.js';
 import { HomeNetwork } from './network.js';
-import { createConfigApi } from './editor.js';
+import { createConfigApi, fromOwnPage, readBody } from './editor.js';
+import { createAuth, PUBLIC_PATHS, safeNext } from './auth.js';
+import { createIconFetcher } from './icons.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -127,10 +130,13 @@ export const forgetIcons = () => iconCache.clear();
  * @param {boolean} [o.editor]  false = the config can't be read or changed from the page (CONFIG_EDITOR=off)
  * @param {string} [o.iconsDir]  folder for icons added on the page (default: "icons" next to the config file)
  * @param {Function} [o.downloadIcon]  override for tests
+ * @param {object|null} [o.auth]  from createAuth(): the password login (null = none)
+ * @param {boolean} [o.autoIcons]  true = icons that are named but missing are fetched from dashboard-icons
  */
-export function createApp({ monitor, network, publicDir = path.join(root, 'public'), editor = true, iconsDir, downloadIcon }) {
+export function createApp({ monitor, network, publicDir = path.join(root, 'public'), editor = true, iconsDir, downloadIcon, auth = null, autoIcons = false }) {
   const userIcons = iconsDir ?? (monitor.configPath ? path.join(path.dirname(monitor.configPath), 'icons') : null);
   const icons = () => iconVersions(publicDir, userIcons);
+  const fetchIcons = autoIcons && userIcons ? createIconFetcher({ iconsDir: userIcons, download: downloadIcon, onIcon: forgetIcons }) : null;
   const configApi =
     editor && typeof monitor.readConfigFile === 'function'
       ? createConfigApi({
@@ -151,11 +157,12 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
     const data = Buffer.from(JSON.stringify(body));
     send(res.req, res, status, { data, type: MIME['.json'], cache: 'no-store', gzip: () => zlib.gzipSync(data) });
   };
-  let indexPage = null; // the page with versioned links, kept until one of those versions changes
+  const pages = new Map(); // the pages with versioned links, kept until one of those versions changes
 
   return http.createServer((req, res) => {
     const isConfigApi = /^\/api\/config(\/|$)/.test(req.url ?? '');
-    if (req.method !== 'GET' && req.method !== 'HEAD' && !(configApi && isConfigApi)) {
+    const isAuthApi = auth != null && req.method === 'POST' && /^\/api\/(login|logout)$/.test(req.url ?? '');
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !(configApi && isConfigApi) && !isAuthApi) {
       res.writeHead(405, { allow: 'GET, HEAD', ...SECURITY_HEADERS });
       return res.end();
     }
@@ -169,17 +176,61 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
     }
 
     if (pathname === '/healthz') return json(res, 200, { ok: true });
+
+    // ---- password login (only when HUB_PASSWORD is set) ----
+    const loggedIn = auth ? auth.loggedIn(req) : false;
+    if (auth) {
+      if (pathname === '/api/login' && req.method === 'POST') {
+        if (!fromOwnPage(req)) return json(res, 403, { error: 'Logins are only accepted from the hub page itself.' });
+        return void readBody(req).then(
+          (body) => {
+            const result = auth.login(req, body?.password);
+            if (result.ok) {
+              res.setHeader('set-cookie', result.cookie);
+              return json(res, 200, { ok: true, next: safeNext(body?.next) });
+            }
+            return json(res, result.wait > 0 ? 429 : 401, { error: result.wait > 0 ? 'Too many wrong passwords. Wait a minute and try again.' : 'Wrong password.', wait: result.wait });
+          },
+          (err) => json(res, err.status ?? 400, { error: err.message })
+        );
+      }
+      if (pathname === '/api/logout' && req.method === 'POST') {
+        if (!fromOwnPage(req)) return json(res, 403, { error: 'Only accepted from the hub page itself.' });
+        res.setHeader('set-cookie', auth.logoutCookie(req));
+        return json(res, 200, { ok: true });
+      }
+      const needsLogin = auth.mode === 'all' ? !PUBLIC_PATHS.has(pathname) : isConfigApi;
+      if (needsLogin && !loggedIn) {
+        // only a page that is being opened goes to the login; scripts, pictures and the API get a plain "no"
+        const opensPage = pathname === '/' || String(req.headers.accept ?? '').includes('text/html');
+        if (pathname.startsWith('/api/') || !opensPage) return json(res, 401, { error: 'Log in first.', login: true });
+        // a page: off to the login, and back here afterwards
+        res.writeHead(302, { location: `/login?next=${encodeURIComponent(safeNext(req.url))}`, 'cache-control': 'no-store', ...SECURITY_HEADERS });
+        return res.end();
+      }
+    }
+    if (pathname === '/login') pathname = auth ? '/login.html' : '/';
+
     if (pathname === '/api/status') {
       const client = network ? network.detect(req) : { home: null, via: 'unknown', reason: 'Home detection is off', clientIp: null, serverIp: null };
-      return json(res, 200, { ...monitor.snapshot(), client, icons: icons(), editor: configApi != null });
+      const snapshot = monitor.snapshot();
+      const known = icons();
+      if (fetchIcons) {
+        // icons that are named on a card but have no file yet: fetched in the background, there on a later refresh
+        const missing = snapshot.groups.flatMap((g) => g.services.map((s) => s.icon)).filter((name) => name && !known[name] && !known[name.toLowerCase()]);
+        if (missing.length > 0) fetchIcons(missing).catch(() => {});
+      }
+      return json(res, 200, { ...snapshot, client, icons: known, editor: configApi != null, auth: auth ? { mode: auth.mode, loggedIn } : null });
     }
     if (pathname === '/api/containers') return json(res, 200, monitor.containers());
+    if (isAuthApi) return json(res, 404, { error: 'Not found' });
     if (pathname === '/api/config' || pathname.startsWith('/api/config/')) {
       if (!configApi) return json(res, 404, { error: 'The config editor is switched off (CONFIG_EDITOR=off).' });
       return void configApi(req, res, pathname, json);
     }
 
     const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+    const isPage = rel === 'index.html' || rel === 'login.html';
     let file = path.resolve(publicDir, rel);
     if (file !== publicDir && !file.startsWith(publicDir + path.sep)) {
       res.writeHead(403, SECURITY_HEADERS);
@@ -200,13 +251,13 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
     // Cloudflare rewrites the cache header of .js/.css files to "max-age=14400" (4 hours), so after an
     // update browsers would keep the old script and style. The page therefore asks for them with a
     // version in the address (?v=...), which changes whenever their content does.
-    if (rel === 'index.html') {
+    if (isPage) {
       const html = withAssetVersions(entry.data.toString('utf8'), publicDir);
-      if (indexPage?.html !== html) {
+      if (pages.get(rel)?.html !== html) {
         const data = Buffer.from(html);
-        indexPage = { html, data, hash: sha(data), gzip: null };
+        pages.set(rel, { html, data, hash: sha(data), gzip: null });
       }
-      entry = indexPage;
+      entry = pages.get(rel);
     }
     const page = entry;
     send(req, res, 200, {
@@ -214,7 +265,7 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
       type: MIME[ext] ?? 'application/octet-stream',
       // Asked for with the current version in the address: the browser may keep it for good, a new
       // version has a new address. Everything else is checked each time, answered with "not changed".
-      cache: rel !== 'index.html' && url.searchParams.get('v') === page.hash ? KEEP_FOREVER : 'no-cache',
+      cache: !isPage && url.searchParams.get('v') === page.hash ? KEEP_FOREVER : 'no-cache',
       etag: page.hash,
       gzip: COMPRESSIBLE.has(ext) ? () => (page.gzip ??= zlib.gzipSync(page.data)) : null
     });
@@ -232,12 +283,17 @@ function main() {
   monitor.start();
   const network = new HomeNetwork({
     getExtraIps: () => monitor.config.settings.home?.publicIps ?? [],
+    getClientIpHeader: () => monitor.config.settings.home?.clientIpHeader ?? '',
     getRunsAtHome: () => monitor.config.settings.home?.runsAtHome !== false
   });
   network.start();
   const port = Number(process.env.PORT ?? 8080);
   const editor = !['off', 'false', '0', 'no'].includes((process.env.CONFIG_EDITOR ?? '').toLowerCase());
-  const server = createApp({ monitor, network, editor });
+  const off = (value) => ['off', 'false', '0', 'no'].includes(String(value ?? '').toLowerCase());
+  const auth = createAuth({ password: process.env.HUB_PASSWORD ?? '', protects: process.env.HUB_PASSWORD_PROTECTS ?? 'all' });
+  if (auth) console.log(`[hub] password login is on (protects: ${auth.mode === 'all' ? 'the whole page' : 'the config editor'})`);
+  else if (editor) console.log('[hub] no password set (HUB_PASSWORD): anyone who can reach this port can see the page and edit the config');
+  const server = createApp({ monitor, network, editor, auth, autoIcons: !off(process.env.ICON_DOWNLOAD) });
   // HOST=:: also answers on IPv6 (the laptop preview sets it: "localhost" is tried on IPv6 first on Windows)
   const host = process.env.HOST ?? '0.0.0.0';
   server.listen(port, host, () => console.log(`[hub] listening on http://${host.includes(':') ? `[${host}]` : host}:${port}`));

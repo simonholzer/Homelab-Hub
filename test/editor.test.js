@@ -132,7 +132,7 @@ test('API: read, preview, save with backup, and the refusals', async () => {
     assert.equal(fs.readFileSync(file, 'utf8'), YAML);
 
     // a config with problems is not saved
-    const bad = await call('PUT', '/api/config', { version: got.data.version, text: 'title: x\n' });
+    const bad = await call('PUT', '/api/config', { version: got.data.version, text: 'groups: nope\n' });
     assert.equal(bad.status, 422);
     assert.ok(bad.data.errors.length > 0);
 

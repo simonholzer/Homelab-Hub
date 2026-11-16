@@ -199,7 +199,7 @@ export function fromOwnPage(req) {
   }
 }
 
-function readBody(req) {
+export function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;

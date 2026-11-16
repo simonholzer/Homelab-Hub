@@ -7,6 +7,9 @@ import path from 'node:path';
 import { parse } from 'yaml';
 
 export const DEFAULT_SETTINGS = { checkIntervalSeconds: 30, timeoutSeconds: 4, statsIntervalSeconds: 5 };
+export const LANGUAGES = ['auto', 'en', 'de'];
+/** Docker labels that make a card: homelab-hub.name, homelab-hub.url, ... */
+export const LABEL_PREFIX = 'homelab-hub.';
 
 /** Replaces {alias} with the value from `hosts:`; unknown aliases are reported. */
 export function interpolate(value, hosts, where, errors) {
@@ -51,7 +54,7 @@ function number(value, fallback, min, max, where, errors) {
 }
 
 /** Turns one `check:` value into {type:'http'|'tcp', ...} or null (= no check). */
-function normalizeCheck(raw, service, hosts, where, errors) {
+function normalizeCheck(raw, service, hosts, where, errors, loginHosts = []) {
   const insecure = service.insecure === true;
   if (raw === false || raw === null && 'check' in service) return null;
   if (typeof raw === 'string' && ['none', 'off', 'no', 'false'].includes(raw.toLowerCase())) return null;
@@ -76,7 +79,7 @@ function normalizeCheck(raw, service, hosts, where, errors) {
     return { type: 'tcp', host: u.hostname, port: Number(u.port) };
   }
   if (u.protocol === 'http:' || u.protocol === 'https:') {
-    return { type: 'http', url: resolved, insecure };
+    return { type: 'http', url: resolved, insecure, ...(loginHosts.length > 0 ? { loginHosts } : {}) };
   }
   errors.push(`${where}.check: only http://, https:// and tcp:// are supported`);
   return null;
@@ -115,7 +118,30 @@ export function normalizeConfig(raw) {
   // then not "home" by itself, it only is when this machine's public IP is one of publicIps.
   const runsAtHomeRaw = raw.settings?.home?.runsAtHome;
   if (runsAtHomeRaw != null && typeof runsAtHomeRaw !== 'boolean') errors.push('settings.home.runsAtHome: must be true or false');
-  settings.home = { publicIps, runsAtHome: runsAtHomeRaw !== false };
+  // Behind a reverse proxy other than Cloudflare: the header in which the proxy passes the visitor's
+  // address (x-forwarded-for, x-real-ip, ...). Cloudflare's own header is always understood.
+  let clientIpHeader = '';
+  const headerRaw = raw.settings?.home?.clientIpHeader;
+  if (headerRaw != null && headerRaw !== '') {
+    if (typeof headerRaw !== 'string' || !/^[A-Za-z0-9-]+$/.test(headerRaw)) errors.push('settings.home.clientIpHeader: must be a header name like x-forwarded-for');
+    else clientIpHeader = headerRaw.toLowerCase();
+  }
+  settings.home = { publicIps, runsAtHome: runsAtHomeRaw !== false, clientIpHeader };
+
+  // Host names of your own login pages (Authelia, Authentik, ...): a check that is redirected there
+  // says nothing about the service behind it, so it shows "unknown" instead of green.
+  settings.loginHosts = [];
+  for (const [i, host] of asList(s.loginHosts).entries()) {
+    if (!/^[a-z0-9.-]+$/i.test(host)) errors.push(`settings.loginHosts[${i}]: "${host}" is not a host name (write it without https:// and path)`);
+    else settings.loginHosts.push(host.toLowerCase());
+  }
+  // Cards from Docker labels (homelab-hub.name, homelab-hub.url, ...): on unless switched off.
+  if (s.dockerLabels != null && typeof s.dockerLabels !== 'boolean') errors.push('settings.dockerLabels: must be true or false');
+  settings.dockerLabels = s.dockerLabels !== false;
+  // Language of the page for browsers that have not chosen one: auto (the browser's), en, de.
+  const language = s.language == null ? 'auto' : String(s.language).toLowerCase();
+  if (!LANGUAGES.includes(language)) errors.push(`settings.language: must be one of ${LANGUAGES.join(', ')}`);
+  settings.language = LANGUAGES.includes(language) ? language : 'auto';
 
   const disks = [];
   for (const [i, d] of (raw.stats?.disks ?? []).entries()) {
@@ -133,9 +159,9 @@ export function normalizeConfig(raw) {
   }
 
   const groups = [];
-  if (!Array.isArray(raw.groups) || raw.groups.length === 0) {
-    errors.push('groups: needs at least one group with services');
-  } else {
+  if (raw.groups != null && !Array.isArray(raw.groups)) {
+    errors.push('groups: must be a list of groups');
+  } else if (raw.groups != null) {
     raw.groups.forEach((g, gi) => {
       const gWhere = `groups[${gi}]`;
       if (!g || typeof g.name !== 'string' || !g.name.trim()) {
@@ -171,7 +197,7 @@ export function normalizeConfig(raw) {
           errors.push(`${label}.local: must be a full http:// or https:// address`);
           return;
         }
-        const check = normalizeCheck(svc.check, { ...svc, url: url || localUrl }, hosts, label, errors);
+        const check = normalizeCheck(svc.check, { ...svc, url: url || localUrl }, hosts, label, errors, settings.loginHosts);
         services.push({
           id: `g${gi}s${si}`,
           name: svc.name.trim(),
@@ -198,6 +224,7 @@ export function normalizeConfig(raw) {
   return {
     config: {
       title: String(raw.title ?? 'Homelab Hub'),
+      hosts,
       subtitle: raw.subtitle == null ? '' : String(raw.subtitle),
       settings,
       stats: {
@@ -210,6 +237,46 @@ export function normalizeConfig(raw) {
     },
     errors: []
   };
+}
+
+/**
+ * Cards described on the containers themselves, with labels:
+ *   homelab-hub.name   (default: the compose service or container name)
+ *   homelab-hub.url    public address        homelab-hub.local   home network address (one of the two is needed)
+ *   homelab-hub.group  (default "Docker")    homelab-hub.icon    homelab-hub.check    homelab-hub.description
+ * The same rules as for the YAML apply ({host} shortcuts included). The card shows the health of its container.
+ * @param {object[]} containers  from docker.js (each with .labels: the homelab-hub.* ones, prefix removed)
+ * @param {object} config        the loaded config (hosts and settings are used)
+ * @returns {{groups: {name: string, services: object[]}[], errors: string[]}}
+ */
+export function servicesFromLabels(containers, config) {
+  const groups = new Map();
+  const errors = [];
+  const seen = new Set();
+  for (const c of containers) {
+    const l = c.labels;
+    if (!l || (!l.url && !l.local)) continue;
+    if (String(l.hide ?? l.hidden ?? '').toLowerCase() === 'true') continue;
+    const groupName = String(l.group ?? 'Docker').trim() || 'Docker';
+    const name = String(l.name ?? (c.service || c.name)).trim() || c.name;
+    const key = `${groupName}/${name}`;
+    if (seen.has(key)) continue; // several replicas of one service: one card
+    seen.add(key);
+    const svc = { name, containers: [c.name] };
+    for (const k of ['url', 'local', 'icon', 'check', 'description']) if (l[k] != null && l[k] !== '') svc[k] = l[k];
+    if (String(l.insecure ?? '').toLowerCase() === 'true') svc.insecure = true;
+    const one = normalizeConfig({ hosts: config.hosts ?? {}, settings: { loginHosts: config.settings?.loginHosts ?? [] }, groups: [{ name: groupName, services: [svc] }] });
+    if (!one.config) {
+      errors.push(...one.errors.map((e) => `container ${c.name}: ${e}`));
+      continue;
+    }
+    const made = one.config.groups[0].services[0];
+    made.id = `d:${c.name}`;
+    made.fromDocker = true;
+    if (!groups.has(groupName)) groups.set(groupName, { name: groupName, services: [] });
+    groups.get(groupName).services.push(made);
+  }
+  return { groups: [...groups.values()], errors };
 }
 
 /** Parses YAML text. YAML syntax errors come back as errors, never as exceptions. */

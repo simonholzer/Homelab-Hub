@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="dark light">
   <title>Homelab Hub</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -39,9 +40,9 @@
     <footer class="foot">
       <span id="updated"></span>
       <span class="sep">·</span>
-      <a href="/api/containers" target="_blank" rel="noopener">containers</a>
+      <a id="link-containers" href="/api/containers" target="_blank" rel="noopener">containers</a>
       <span class="sep">·</span>
-      <a href="/api/status" target="_blank" rel="noopener">status JSON</a>
+      <a id="link-status" href="/api/status" target="_blank" rel="noopener">status JSON</a>
     </footer>
   </div>
   <!-- the config editor is only loaded when it is opened (gear menu); the addresses get their version here -->

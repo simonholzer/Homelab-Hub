@@ -1,7 +1,23 @@
 # Deploy to TrueNAS
 
-The image is built on the NAS from the last git commit (no registry needed), and the app is installed once via YAML.
-For a plain Docker host you don't need any of this: see the quick start in the [README](README.md).
+## The easy way: the published image
+
+In TrueNAS: **Apps → Discover Apps → ⋮ → Install via YAML**, name **`homelab-hub`**, paste [compose.yaml](compose.yaml)
+and change two things:
+
+- `./data:/config` → a dataset path, e.g. `/mnt/tank/appdata/homelab-hub:/config`
+- the port, if 8080 is taken (e.g. `"30082:8080"`)
+
+Save and open `http://<nas>:<port>`. The container fixes the owner of the config folder by itself. To update, pull the
+new image in the app's menu. The rest of this page is only needed for the other way.
+
+## The other way: build the image on the NAS
+
+Useful when you change the code yourself, or don't want to pull an image from a registry.
+The image is built on the NAS from the last git commit, and the app is installed once via YAML.
+
+The first start copies the small starter config. To begin with the full example instead, run the build script
+once with `--replace-config` (see below).
 
 The examples below use these placeholders. Replace them with your own:
 
@@ -16,7 +32,7 @@ The examples below use these placeholders. Replace them with your own:
 If your pool has another name, change it in [compose.truenas.yaml](compose.truenas.yaml) and in `DATA_DIR` at the top of
 [scripts/nas-build.sh](scripts/nas-build.sh) (or pass `DATA_DIR=/mnt/yourpool/appdata/homelab-hub` to the script).
 
-## First install
+### First install
 
 ```bash
 git status                                   # commit everything first: the NAS gets the last commit
@@ -68,7 +84,7 @@ after the copy step: it builds the image **and** replaces the config (the old on
 
 ## Cloudflare Tunnel (optional)
 
-The hub has no login of its own. To reach it from outside, put it behind a
+To reach the hub from outside, either set `HUB_PASSWORD` (see the README) or put it behind a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) with a
 Cloudflare Access application in front:
 

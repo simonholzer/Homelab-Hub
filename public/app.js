@@ -1,4 +1,6 @@
 // Renders /api/status. All text goes in through textContent (config values are never HTML).
+import { t, setLanguage, LANGUAGES } from '/i18n.js';
+
 const DEFAULT_REFRESH_SECONDS = 10;
 const MIN_REFRESH_SECONDS = 2;
 const MAX_REFRESH_SECONDS = 3600;
@@ -33,7 +35,8 @@ try {
 }
 
 // What the page shows: chosen in the gear menu, remembered in this browser.
-const prefs = { health: true, stats: true, pinned: true, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS };
+const prefs = { health: true, stats: true, pinned: true, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', lang: 'auto' };
+const THEMES = ['auto', 'dark', 'light'];
 /** A whole number of seconds within the allowed range, or null. */
 function validRefresh(value) {
   const n = Math.round(Number(value));
@@ -44,6 +47,8 @@ try {
   for (const key of ['health', 'stats', 'pinned']) if (typeof saved[key] === 'boolean') prefs[key] = saved[key];
   prefs.refreshSeconds = validRefresh(saved.refreshSeconds) ?? DEFAULT_REFRESH_SECONDS;
   if (Array.isArray(saved.hiddenGroups)) prefs.hiddenGroups = saved.hiddenGroups.filter((n) => typeof n === 'string');
+  if (THEMES.includes(saved.theme)) prefs.theme = saved.theme;
+  if (saved.lang === 'auto' || Object.hasOwn(LANGUAGES, saved.lang)) prefs.lang = saved.lang;
 } catch {
   // storage blocked or damaged: everything is shown
 }
@@ -53,6 +58,26 @@ function savePrefs() {
   } catch {
     // storage blocked: lasts until reload
   }
+}
+
+/** Dark, light, or what the system says (the same rule as theme.js, which runs before the page is drawn). */
+function applyTheme() {
+  if (prefs.theme === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = prefs.theme;
+}
+
+/** The language chosen in this browser, else the one set in the YAML, else the browser's. Returns true when it changed. */
+function applyLanguage() {
+  const changed = setLanguage(prefs.lang !== 'auto' ? prefs.lang : data?.language ?? 'auto');
+  // the fixed texts of index.html
+  els.filter.placeholder = t('Filter services  ( press / )');
+  els.filter.setAttribute('aria-label', t('Filter services'));
+  gear.title = t('Settings');
+  gear.setAttribute('aria-label', t('Settings'));
+  panel.setAttribute('aria-label', t('Settings'));
+  $('link-containers').textContent = t('containers');
+  $('link-status').textContent = t('status JSON');
+  return changed;
 }
 
 /** True when cards should open their local (home network) address. */
@@ -128,17 +153,17 @@ function formatUptime(sec) {
   const d = Math.floor(sec / 86400);
   const hr = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
-  if (d > 0) return `${d} d ${hr} h`;
-  if (hr > 0) return `${hr} h ${m} min`;
-  return `${m} min`;
+  if (d > 0) return t('{d} d {h} h', { d, h: hr });
+  if (hr > 0) return t('{h} h {m} min', { h: hr, m });
+  return t('{m} min', { m });
 }
 
 function ago(ms) {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  if (s < 5) return 'just now';
-  if (s < 60) return `${s} s ago`;
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  return `${Math.round(s / 3600)} h ago`;
+  if (s < 5) return t('just now');
+  if (s < 60) return t('{n} s ago', { n: s });
+  if (s < 3600) return t('{n} min ago', { n: Math.round(s / 60) });
+  return t('{n} h ago', { n: Math.round(s / 3600) });
 }
 
 function renderSummary() {
@@ -146,8 +171,8 @@ function renderSummary() {
   if (!data) return;
   const { up, down, unknown } = data.summary;
   const chip = (cls, n, word) => h('span', { class: `chip ${cls} ${n === 0 ? 'zero' : ''}`, text: `${n} ${word}` });
-  els.summary.append(chip('up', up, 'online'), chip('down', down, 'offline'));
-  if (unknown > 0) els.summary.append(chip('', unknown, 'unknown'));
+  els.summary.append(chip('up', up, t('online')), chip('down', down, t('offline')));
+  if (unknown > 0) els.summary.append(chip('', unknown, t('unknown')));
 }
 
 function renderNetmode() {
@@ -155,13 +180,13 @@ function renderNetmode() {
   b.hidden = !data;
   if (!data) return;
   const home = atHome();
-  const how = mode === 'auto' ? (data.client?.home == null ? 'auto, not sure' : 'auto') : 'set by you';
-  b.textContent = `${home ? 'Home network' : 'Away'} · ${how}`;
+  const how = mode === 'auto' ? (data.client?.home == null ? t('auto, not sure') : t('auto')) : t('set by you');
+  b.textContent = `${home ? t('Home network') : t('Away')} · ${how}`;
   b.dataset.state = home ? 'home' : 'away';
   b.title = [
-    home ? 'Cards open their local address (no Cloudflare).' : 'Cards open their public address (through Cloudflare).',
-    mode === 'auto' ? data.client?.reason ?? '' : 'Switched by hand.',
-    'Click to switch: Auto → Home → Away.'
+    home ? t('Cards open their local address.') : t('Cards open their public address.'),
+    mode === 'auto' ? data.client?.reason ?? '' : t('Switched by hand.'),
+    t('Click to switch: Auto → Home → Away.')
   ].filter(Boolean).join('\n');
 }
 
@@ -169,7 +194,7 @@ function renderBanner() {
   const parts = [];
   if (data?.configError) {
     const box = h('div', {});
-    box.append(h('strong', { text: 'Config problem' }), document.createTextNode(data.configError.message));
+    box.append(h('strong', { text: t('Config problem') }), document.createTextNode(t(data.configError.message)));
     if (data.configError.lines.length) {
       const ul = h('ul');
       for (const line of data.configError.lines) ul.append(h('li', { text: line }));
@@ -178,16 +203,16 @@ function renderBanner() {
     parts.push({ cls: 'error', node: box });
   }
   if (connection === 'login') {
-    const box = h('div', {}, 'Your Cloudflare login has expired. ');
-    const btn = h('button', { type: 'button', text: 'Log in again' });
+    const box = h('div', {}, t('Your login has expired. '));
+    const btn = h('button', { type: 'button', text: t('Log in again') });
     btn.addEventListener('click', () => location.reload());
     box.append(btn);
     parts.push({ cls: '', node: box });
   } else if (connection === 'lost') {
-    parts.push({ cls: '', node: h('div', { text: `Can't reach the hub right now. Showing the last data${lastOk ? ` (${ago(lastOk)})` : ''}.` }) });
+    parts.push({ cls: '', node: h('div', { text: lastOk ? t("Can't reach the hub right now. Showing the last data ({ago}).", { ago: ago(lastOk) }) : t("Can't reach the hub right now. Showing the last data.") }) });
   }
   if (data && data.checkedAt && Date.now() - data.checkedAt > data.checkIntervalSeconds * 3000 + 10_000) {
-    parts.push({ cls: '', node: h('div', { text: 'The status checks seem stuck: the data is old.' }) });
+    parts.push({ cls: '', node: h('div', { text: t('The status checks seem stuck: the data is old.') }) });
   }
   els.banner.replaceChildren();
   els.banner.hidden = parts.length === 0;
@@ -221,27 +246,27 @@ function renderStats() {
   els.stats.replaceChildren();
   els.stats.hidden = !s || !prefs.stats;
   if (!s || !prefs.stats) return;
-  const caption = s.source === 'os' ? 'This computer · local preview' : data.statsLabel;
+  const caption = s.source === 'os' ? t('This computer · local preview') : data.statsLabel;
   if (caption) {
-    const title = s.source === 'os' ? 'No /proc here (Windows/macOS), so these are the numbers of the computer running the hub, not the NAS.' : '';
+    const title = s.source === 'os' ? t('No /proc here (Windows/macOS), so these are the numbers of the computer running the hub, not of your server.') : '';
     els.stats.append(h('div', { class: 'stats-title', title, text: caption }));
   }
   if (s.cpuPercent != null) {
-    const note = [s.cores ? `${s.cores} threads` : '', s.cpuTempC != null ? `${s.cpuTempC} °C` : ''].filter(Boolean).join(' · ');
-    els.stats.append(statBox('CPU', `${s.cpuPercent} %`, note, { pct: s.cpuPercent, wide: true }));
+    const note = [s.cores ? t('{n} threads', { n: s.cores }) : '', s.cpuTempC != null ? `${s.cpuTempC} °C` : ''].filter(Boolean).join(' · ');
+    els.stats.append(statBox(t('CPU'), `${s.cpuPercent} %`, note, { pct: s.cpuPercent, wide: true }));
   } else if (s.cpuTempC != null) {
-    els.stats.append(statBox('CPU temperature', `${s.cpuTempC} °C`));
+    els.stats.append(statBox(t('CPU temperature'), `${s.cpuTempC} °C`));
   }
   if (s.memory && s.memory.total > 0) {
     const pct = (s.memory.used / s.memory.total) * 100;
-    const note = s.memory.cache != null ? `${Math.round(pct)} % used · lighter part: ${formatBytes(s.memory.cache)} ZFS cache (freed when needed)` : `${Math.round(pct)} % used`;
+    const note = s.memory.cache != null ? t('{pct} % used · lighter part: {cache} ZFS cache (freed when needed)', { pct: Math.round(pct), cache: formatBytes(s.memory.cache) }) : t('{pct} % used', { pct: Math.round(pct) });
     const cachePct = s.memory.cache ? (s.memory.cache / s.memory.total) * 100 : 0;
-    els.stats.append(statBox('Memory', `${formatBytes(s.memory.used)} of ${formatBytes(s.memory.total)}`, note, { pct, cachePct, wide: true }));
+    els.stats.append(statBox(t('Memory'), t('{used} of {total}', { used: formatBytes(s.memory.used), total: formatBytes(s.memory.total) }), note, { pct, cachePct, wide: true }));
   }
   if (s.network?.rxBytesPerSec != null) {
     const n = s.network;
-    const box = statBox('Network', `↓ ${formatRate(n.rxBytesPerSec)}`, `↑ ${formatRate(n.txBytesPerSec)}`);
-    box.title = `Average over the last check cycle, card${n.interfaces.length > 1 ? 's' : ''}: ${n.interfaces.join(', ')}`;
+    const box = statBox(t('Network'), `↓ ${formatRate(n.rxBytesPerSec)}`, `↑ ${formatRate(n.txBytesPerSec)}`);
+    box.title = t(n.interfaces.length > 1 ? 'Average over the last check cycle, cards: {cards}' : 'Average over the last check cycle, card: {cards}', { cards: n.interfaces.join(', ') });
     els.stats.append(box);
   }
   if (s.load) {
@@ -249,21 +274,21 @@ function renderStats() {
     // threads means fully busy; more means a queue. The bar shows the 1-minute value against the thread count.
     const [l1, l5, l15] = s.load;
     const threads = s.cores || null;
-    const note = `5 min ${l5.toFixed(2)} · 15 min ${l15.toFixed(2)}${threads ? ` · ${threads} threads` : ''}`;
-    const box = statBox('Load', `${l1.toFixed(2)}`, note, threads ? { pct: (l1 / threads) * 100 } : {});
-    box.title = `Load average: tasks running or waiting for the CPU, averaged over 1, 5 and 15 minutes.${threads ? ` ${threads} means every thread is busy all the time; higher means tasks have to wait.` : ''}`;
+    const note = t('5 min {a} · 15 min {b}', { a: l5.toFixed(2), b: l15.toFixed(2) }) + (threads ? ` · ${t('{n} threads', { n: threads })}` : '');
+    const box = statBox(t('Load'), `${l1.toFixed(2)}`, note, threads ? { pct: (l1 / threads) * 100 } : {});
+    box.title = t('Load average: tasks running or waiting for the CPU, averaged over 1, 5 and 15 minutes.') + (threads ? ` ${t('{n} means every thread is busy all the time; higher means tasks have to wait.', { n: threads })}` : '');
     els.stats.append(box);
   }
-  if (s.uptimeSeconds != null) els.stats.append(statBox('Uptime', formatUptime(s.uptimeSeconds)));
+  if (s.uptimeSeconds != null) els.stats.append(statBox(t('Uptime'), formatUptime(s.uptimeSeconds)));
   for (const d of s.disks ?? []) {
     if (d.error) {
-      els.stats.append(statBox(d.name, 'unreadable', d.error));
+      els.stats.append(statBox(d.name, t('unreadable'), d.error));
     } else if (d.totalBytes) {
       const used = d.totalBytes - d.freeBytes;
       const pct = (used / d.totalBytes) * 100;
-      els.stats.append(statBox(d.name, formatUsedOfTotal(used, d.totalBytes), `${formatBytes(d.freeBytes)} free · ${Math.round(pct)} % used`, { pct, compact: true }));
+      els.stats.append(statBox(d.name, formatUsedOfTotal(used, d.totalBytes), t('{free} free · {pct} % used', { free: formatBytes(d.freeBytes), pct: Math.round(pct) }), { pct, compact: true }));
     } else {
-      els.stats.append(statBox(d.name, `${formatBytes(d.freeBytes)} free`));
+      els.stats.append(statBox(d.name, t('{free} free', { free: formatBytes(d.freeBytes) })));
     }
   }
 }
@@ -271,10 +296,10 @@ function renderStats() {
 function healthBadge(svc) {
   if (!prefs.health || !svc.watchContainers) return null;
   const c = svc.containers;
-  if (!c) return h('span', { class: 'health', title: data.dockerError || 'No container data yet', text: 'containers: ?' });
-  const label = HEALTH_LABEL[c.state] ?? c.state;
+  if (!c) return h('span', { class: 'health', title: data.dockerError || t('No container data yet'), text: t('containers: ?') });
+  const label = t(HEALTH_LABEL[c.state] ?? c.state);
   const text = c.state === 'missing' ? label : c.total > 1 ? `${label} (${c.total})` : label;
-  const title = c.items.map((i) => `${i.name}: ${i.health}`).join('\n') || 'No matching container. See /api/containers.';
+  const title = c.items.map((i) => `${i.name}: ${t(HEALTH_LABEL[i.health] ?? i.health)}`).join('\n') || t('No matching container. See /api/containers.');
   return h('span', { class: `health ${c.state}`, title, text: `● ${text}` });
 }
 
@@ -300,7 +325,9 @@ function isMostlyDark(img) {
       sum += ((0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255) * a;
       weight += a;
     }
-    return weight > 0 && sum / weight < 0.3;
+    const dark = getComputedStyle(document.documentElement).colorScheme !== 'light';
+    // a mostly dark logo vanishes on the dark page, a mostly light one on the light page
+    return weight > 0 && (dark ? sum / weight < 0.3 : sum / weight > 0.72);
   } catch {
     return false; // can't measure: leave the logo as it is
   }
@@ -348,20 +375,20 @@ function togglePin(key) {
 
 function card(svc, groupName) {
   const status = svc.status in STATUS_LABEL ? svc.status : 'unknown';
-  const pillTitle = [svc.detail, svc.ms != null ? `${svc.ms} ms` : ''].filter(Boolean).join(' · ');
-  const pill = h('span', { class: `pill ${status}`, title: pillTitle, text: STATUS_LABEL[status] });
+  const pillTitle = [t(svc.detail), svc.ms != null ? `${svc.ms} ms` : ''].filter(Boolean).join(' · ');
+  const pill = h('span', { class: `pill ${status}`, title: pillTitle, text: t(STATUS_LABEL[status]) });
   const top = h('div', { class: 'row' }, iconFor(svc.icon), h('span', { class: 'name', text: svc.name }), pill);
   const href = linkFor(svc);
   const homeOnly = !svc.url; // no public address: only reachable on the home network
-  const hostText = href ? hostOf(href) : `${hostOf(svc.localUrl)} (home network only)`;
+  const hostText = href ? hostOf(href) : t('{host} (home network only)', { host: hostOf(svc.localUrl) });
   const meta = h('div', { class: 'meta' }, h('span', { class: 'host', text: hostText }), healthBadge(svc));
   const body = [top];
   const cls = `card ${status}${href ? '' : ' homeonly'}`;
   const a = href
     ? h('a', { class: cls, href, target: '_blank', rel: 'noopener noreferrer' }, ...body)
-    : h('div', { class: cls, title: 'Only reachable on the home network. Switch to Home at the top if you are there.' }, ...body);
-  if (status === 'down' && svc.detail) a.append(h('div', { class: 'problem', text: svc.detail }));
-  if (homeOnly && href) a.append(h('div', { class: 'tag', text: 'home network only' }));
+    : h('div', { class: cls, title: t('Only reachable on the home network. Switch to Home at the top if you are there.') }, ...body);
+  if (status === 'down' && svc.detail) a.append(h('div', { class: 'problem', text: t(svc.detail) }));
+  if (homeOnly && href) a.append(h('div', { class: 'tag', text: t('home network only') }));
   a.append(meta);
 
   // The pin button sits next to the card (a button inside a link is not valid HTML).
@@ -371,8 +398,8 @@ function card(svc, groupName) {
     type: 'button',
     class: `pin${pinned ? ' on' : ''}`,
     'aria-pressed': pinned ? 'true' : 'false',
-    'aria-label': `${pinned ? 'Unpin' : 'Pin'} ${svc.name}`,
-    title: pinned ? 'Unpin' : 'Pin to the top'
+    'aria-label': t(pinned ? 'Unpin {name}' : 'Pin {name}', { name: svc.name }),
+    title: pinned ? t('Unpin') : t('Pin to the top')
   });
   pin.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M9 3h6l-1 6 3 3v2h-4v6l-1 1-1-1v-6H7v-2l3-3z"/></svg>'; // fixed markup, no config text
   pin.addEventListener('click', () => togglePin(key));
@@ -428,7 +455,7 @@ function renderGroups() {
   if (pinned.length > 0 && prefs.pinned) {
     const cards = h('div', { class: 'cards' });
     for (const { s, g } of pinned) cards.append(card(s, g.name));
-    els.groups.append(h('section', { class: 'group pinned' }, h('h2', { text: 'Pinned' }), cards));
+    els.groups.append(h('section', { class: 'group pinned' }, h('h2', { text: t('Pinned') }), cards));
   }
 
   for (const g of data?.groups ?? []) {
@@ -442,11 +469,11 @@ function renderGroups() {
     const closed = q ? false : collapsed[g.name] ?? state === 'down';
     const head = h(
       'button',
-      { type: 'button', class: 'grouphead', 'aria-expanded': closed ? 'false' : 'true', title: closed ? 'Open' : 'Close' },
+      { type: 'button', class: 'grouphead', 'aria-expanded': closed ? 'false' : 'true', title: closed ? t('Open') : t('Close') },
       h('span', { class: 'chev', 'aria-hidden': 'true', text: '▾' }),
-      h('span', { class: `gdot ${state}`, title: GROUP_LABEL[state] }),
+      h('span', { class: `gdot ${state}`, title: t(GROUP_LABEL[state]) }),
       h('span', { class: 'gname', text: g.name }),
-      h('span', { class: 'gcount', text: `${up} of ${g.services.length} online` })
+      h('span', { class: 'gcount', text: t('{n} of {m} online', { n: up, m: g.services.length }) })
     );
     head.addEventListener('click', () => toggleGroup(g.name, !closed));
     const section = h('section', { class: `group${closed ? ' closed' : ''}` }, h('h2', {}, head));
@@ -458,12 +485,18 @@ function renderGroups() {
     els.groups.append(section);
   }
   els.empty.hidden = shown > 0 || !data;
+  const none = (data?.groups ?? []).every((g) => g.services.length === 0);
+  els.empty.textContent = !none
+    ? t('Nothing matches your filter.')
+    : data?.editor
+      ? t('No services yet. Open the gear menu at the top right and choose "Edit YAML" to add your first one.')
+      : t('No services yet. Add them to the config file.');
 }
 
 function renderFooter() {
   const parts = [];
-  if (data?.checkedAt) parts.push(`checked ${ago(data.checkedAt)}`);
-  if (data?.checkIntervalSeconds) parts.push(`every ${data.checkIntervalSeconds} s`);
+  if (data?.checkedAt) parts.push(t('checked {ago}', { ago: ago(data.checkedAt) }));
+  if (data?.checkIntervalSeconds) parts.push(t('every {n} s', { n: data.checkIntervalSeconds }));
   els.updated.textContent = parts.join(' · ');
 }
 
@@ -473,12 +506,13 @@ function render() {
     els.subtitle.textContent = data.subtitle;
     document.title = data.title;
   }
+  if (applyLanguage()) drawnCards = null; // another language: the cards are drawn again
   renderSummary();
   renderNetmode();
   renderBanner();
   renderStats();
   // The cards are only rebuilt when something on them changed (most refreshes change nothing).
-  const cards = JSON.stringify([data?.groups, data?.icons, data?.client?.home, data?.dockerError]);
+  const cards = JSON.stringify([data?.groups, data?.icons, data?.client?.home, data?.dockerError, data?.editor]);
   if (cards !== drawnCards) {
     drawnCards = cards;
     renderGroups();
@@ -489,6 +523,8 @@ function render() {
 // ---- config editor: its script and style are fetched on the first click ----
 let editorLoading = null;
 async function openEditor() {
+  // the editor needs the login (HUB_PASSWORD_PROTECTS=editor): log in first, then come back and open it
+  if (data?.auth && !data.auth.loggedIn) return location.assign('/login?next=' + encodeURIComponent('/#edit'));
   const tag = document.querySelector('script[data-editor-js]');
   editorLoading ??= Promise.all([
     import(tag.dataset.editorJs),
@@ -504,15 +540,17 @@ async function openEditor() {
     editor.openEditor();
   } catch {
     editorLoading = null; // try again on the next click
-    alert('The editor could not be loaded. Check the connection and try again.');
+    alert(t('The editor could not be loaded. Check the connection and try again.'));
   }
 }
 
 async function load() {
   try {
     const res = await fetch('/api/status', { cache: 'no-store', redirect: 'manual' });
-    // An expired Cloudflare login turns the API call into a redirect to the login page.
-    if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+    // An expired login at a proxy in front (Cloudflare Access, Authelia, ...) turns the API call into a redirect to its login page.
+    if (res.status === 401) {
+      return location.assign('/login?next=' + encodeURIComponent(location.pathname + location.hash)); // the hub's own login (HUB_PASSWORD)
+    } else if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
       connection = 'login';
     } else if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) {
       connection = 'lost';
@@ -538,15 +576,23 @@ function toggleRow(label, checked, onChange) {
   return h('label', { class: 'opt' }, input, h('span', { text: label }));
 }
 
+/** A labelled drop-down in the gear menu. options: [value, label][] */
+function selectRow(label, value, options, onChange) {
+  const select = h('select', {}, ...options.map(([v, text]) => h('option', { value: v, text })));
+  select.value = value;
+  select.addEventListener('change', () => onChange(select.value));
+  return h('label', { class: 'opt sel' }, h('span', { text: label }), select);
+}
+
 function renderSettings() {
   panel.replaceChildren(
-    h('div', { class: 'set-title', text: 'Show on the page' }),
-    toggleRow('Server stats', prefs.stats, (on) => {
+    h('div', { class: 'set-title', text: t('Show on the page') }),
+    toggleRow(t('Server stats'), prefs.stats, (on) => {
       prefs.stats = on;
       savePrefs();
       renderStats();
     }),
-    toggleRow('Pinned', prefs.pinned, (on) => {
+    toggleRow(t('Pinned'), prefs.pinned, (on) => {
       prefs.pinned = on;
       savePrefs();
       renderGroups();
@@ -558,39 +604,61 @@ function renderSettings() {
         renderGroups();
       })
     ),
-    h('div', { class: 'set-title', text: 'Cards' }),
-    toggleRow('Container health badges', prefs.health, (on) => {
+    h('div', { class: 'set-title', text: t('Cards') }),
+    toggleRow(t('Container health badges'), prefs.health, (on) => {
       prefs.health = on;
       savePrefs();
       renderGroups();
     }),
-    h('div', { class: 'set-title', text: 'Refresh' }),
+    h('div', { class: 'set-title', text: t('Refresh') }),
     refreshRow(),
-    h('p', { class: 'set-note', text: 'Saved in this browser only.' })
+    h('div', { class: 'set-title', text: t('Appearance') }),
+    selectRow(t('Theme'), prefs.theme, [['auto', t('Automatic')], ['dark', t('Dark')], ['light', t('Light')]], (v) => {
+      prefs.theme = v;
+      savePrefs();
+      applyTheme();
+      darkLogo.clear(); // logos are measured against the new background
+      renderGroups();
+    }),
+    selectRow(t('Language'), prefs.lang, [['auto', t('Automatic')], ...Object.entries(LANGUAGES)], (v) => {
+      prefs.lang = v;
+      savePrefs();
+      render();
+      renderSettings();
+    }),
+    h('p', { class: 'set-note', text: t('Saved in this browser only.') })
   );
   if (data?.editor) {
-    const edit = h('button', { type: 'button', class: 'set-btn', text: 'Edit YAML' });
+    const edit = h('button', { type: 'button', class: 'set-btn', text: t('Edit YAML') });
     edit.addEventListener('click', () => {
       setPanel(false);
       openEditor();
     });
     panel.append(
-      h('div', { class: 'set-title', text: 'Configuration' }),
+      h('div', { class: 'set-title', text: t('Configuration') }),
       edit,
-      h('p', { class: 'set-note', text: 'Services, groups, hosts and settings. Saved on the hub for everyone.' })
+      h('p', { class: 'set-note', text: t('Services, groups, hosts and settings. Saved on the hub for everyone.') })
     );
+  }
+  if (data?.auth?.loggedIn) {
+    const out = h('button', { type: 'button', class: 'set-btn', text: t('Log out') });
+    out.addEventListener('click', async () => {
+      await fetch('/api/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => {});
+      location.reload();
+    });
+    panel.append(out);
   }
 }
 
 /** "Refresh every [10] seconds": how often this page asks the hub for new data. */
 function refreshRow() {
-  const input = h('input', { type: 'number', min: MIN_REFRESH_SECONDS, max: MAX_REFRESH_SECONDS, step: 1, inputmode: 'numeric', 'aria-label': 'Refresh interval in seconds' });
+  const input = h('input', { type: 'number', min: MIN_REFRESH_SECONDS, max: MAX_REFRESH_SECONDS, step: 1, inputmode: 'numeric', 'aria-label': t('Refresh interval in seconds') });
   input.value = prefs.refreshSeconds;
   const hint = h('p', { class: 'set-note' });
   const showHint = (bad) => {
     hint.textContent = bad
-      ? `Enter a whole number from ${MIN_REFRESH_SECONDS} to ${MAX_REFRESH_SECONDS}.`
-      : `The hub measures CPU, memory, network and storage every ${data?.statsIntervalSeconds ?? '?'} s and re-checks services and containers every ${data?.checkIntervalSeconds ?? '?'} s (both set in the YAML).`;
+      ? t('Enter a whole number from {min} to {max}.', { min: MIN_REFRESH_SECONDS, max: MAX_REFRESH_SECONDS })
+      : t('The hub measures CPU, memory, network and storage every {stats} s and re-checks services and containers every {checks} s (both set in the YAML).', { stats: data?.statsIntervalSeconds ?? '?', checks: data?.checkIntervalSeconds ?? '?' });
     hint.classList.toggle('bad', Boolean(bad));
   };
   const apply = () => {
@@ -607,7 +675,7 @@ function refreshRow() {
     if (e.key === 'Enter') apply();
   });
   showHint(false);
-  return h('div', {}, h('label', { class: 'opt num' }, h('span', { text: 'Refresh every' }), input, h('span', { text: 'seconds' })), hint);
+  return h('div', {}, h('label', { class: 'opt num' }, h('span', { text: t('Refresh every') }), input, h('span', { text: t('seconds') })), hint);
 }
 
 function setPanel(open) {
@@ -661,7 +729,15 @@ function scheduleRefresh() {
   refreshTimer = setInterval(load, prefs.refreshSeconds * 1000);
 }
 
-load();
+applyTheme();
+applyLanguage();
+load().then(() => {
+  // back from the login that the editor asked for
+  if (location.hash === '#edit' && data?.editor) {
+    history.replaceState(null, '', location.pathname);
+    openEditor();
+  }
+});
 scheduleRefresh();
 setInterval(() => {
   renderBanner();

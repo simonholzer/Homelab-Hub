@@ -3,6 +3,7 @@
 //
 // DOCKER_HOST forms:  http://docker-proxy:2375   tcp://host:2375   unix:///var/run/docker.sock
 import http from 'node:http';
+import { LABEL_PREFIX } from './config.js';
 
 function requestOptions(dockerHost, pathAndQuery) {
   if (dockerHost.startsWith('unix://')) {
@@ -25,6 +26,9 @@ export function normalizeContainer(c) {
   else if (state === 'exited' && /^Exited \(0\)/.test(status)) health = 'completed'; // one-shot job (e.g. a "permissions" init container)
   else health = 'stopped'; // crashed, dead, created, paused ...
   const labels = c.Labels ?? {};
+  // the labels that describe a card (see servicesFromLabels in config.js), without their prefix
+  const hub = {};
+  for (const [k, v] of Object.entries(labels)) if (k.startsWith(LABEL_PREFIX)) hub[k.slice(LABEL_PREFIX.length).toLowerCase()] = String(v);
   return {
     name: String((c.Names?.[0] ?? c.Id ?? '').replace(/^\//, '')),
     project: labels['com.docker.compose.project'] ?? '',
@@ -32,7 +36,8 @@ export function normalizeContainer(c) {
     image: String(c.Image ?? ''),
     state,
     status,
-    health
+    health,
+    ...(Object.keys(hub).length > 0 ? { labels: hub } : {})
   };
 }
 
@@ -77,7 +82,7 @@ const SEVERITY = { stopped: 4, unhealthy: 3, starting: 2, running: 1, healthy: 0
  * Result state: healthy | running (no healthcheck) | starting | unhealthy | stopped | missing
  */
 /**
- * Patterns for a service that has no `containers:` of its own, from its name: "Todo Sync" -> *todo-sync*, *todosync*.
+ * Patterns for a service that has no `containers:` of its own, from its name: "Uptime Kuma" -> *uptime-kuma*, *uptimekuma*.
  * Used for groups with `autoContainers: true`, where a card gets a health badge when a container matches.
  */
 export function autoContainerPatterns(name) {

@@ -121,7 +121,7 @@ test('YAML syntax errors do not throw', () => {
 test('empty / wrong top level', () => {
   assert.equal(parseConfigText('').config, null);
   assert.equal(parseConfigText('- a\n- b').config, null);
-  assert.match(parseConfigText('title: x').errors[0], /groups/);
+  assert.match(parseConfigText('groups: 5').errors[0], /groups/);
 });
 
 test('setting limits are enforced', () => {

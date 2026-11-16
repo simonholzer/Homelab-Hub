@@ -2,6 +2,8 @@
 // Opened from the gear menu (app.js loads this file on the first click). The server does the YAML work
 // (src/editor.js): this page only edits a copy of the parsed file and sends it back.
 // All text goes in through textContent / input values (config values are never HTML).
+import { t, hasText } from '/i18n.js';
+
 const ID = '__i'; // position marker the server puts on list entries; kept as it is
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICONS = {
@@ -18,12 +20,18 @@ const NO_CHECK = ['none', 'off', 'no', 'false'];
 const isObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 const asList = (v) => (v == null || v === false ? [] : Array.isArray(v) ? v.map(String) : [String(v)]);
 
+/** The fixed texts of the form are translated in h(), in one place; texts from the config go in as rawText. */
+const TRANSLATED = new Set(['title', 'aria-label', 'placeholder']);
+const tr = (v) => (typeof v === 'string' && hasText(v) ? t(v) : v);
+
 function h(tag, props = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
-    else if (k === 'text') el.textContent = v;
+    else if (k === 'text') el.textContent = tr(v);
+    else if (k === 'rawText') el.textContent = v;
+    else if (TRANSLATED.has(k)) el.setAttribute(k, tr(v));
     else el.setAttribute(k, v === true ? '' : v);
   }
   for (const c of children.flat()) if (c != null && c !== false) el.append(c);
@@ -63,14 +71,14 @@ async function api(method, url, body) {
     headers: body ? { 'content-type': 'application/json' } : {},
     body: typeof body === 'string' ? body : body ? JSON.stringify(body) : undefined
   });
-  if (res.type === 'opaqueredirect') throw new Error('Your Cloudflare login has expired. Reload the page and log in again.');
+  if (res.type === 'opaqueredirect' || res.status === 401) throw new Error(t('Your login has expired. Reload the page and log in again.'));
   let data = null;
   try {
     data = await res.json();
   } catch {
     // not JSON: handled below
   }
-  if (!data) throw new Error(`The hub answered with an error (${res.status}).`);
+  if (!data) throw new Error(t('The hub answered with an error ({status}).', { status: res.status }));
   return { status: res.status, data };
 }
 
@@ -135,7 +143,7 @@ async function validate() {
     const { status, data } = await api('POST', '/api/config/render', body);
     if (run !== validateRun || !st) return;
     validated = body;
-    st.errors = status === 200 ? data.errors : [data.error ?? 'The config could not be checked.'];
+    st.errors = status === 200 ? data.errors : [tr(data.error ?? 'The config could not be checked.')];
   } catch {
     return; // connection trouble: saving will say so
   }
@@ -146,12 +154,12 @@ function updateStatus() {
   const dirty = isDirty();
   const n = st.errors.length;
   const parts = [];
-  if (st.busy) parts.push('Saving…');
-  else if (!st.writable) parts.push('The file is read-only here, so it cannot be saved');
-  else if (n > 0) parts.push(`${n} problem${n === 1 ? '' : 's'} to fix`);
-  else if (st.note) parts.push(st.note);
-  else parts.push(dirty ? 'Unsaved changes' : 'No changes');
-  if (n > 0 && dirty && !st.busy) parts.push('unsaved changes');
+  if (st.busy) parts.push(t('Saving…'));
+  else if (!st.writable) parts.push(t('The file is read-only here, so it cannot be saved'));
+  else if (n > 0) parts.push(n === 1 ? t('1 problem to fix') : t('{n} problems to fix', { n }));
+  else if (st.note) parts.push(tr(st.note));
+  else parts.push(dirty ? t('Unsaved changes') : t('No changes'));
+  if (n > 0 && dirty && !st.busy) parts.push(t('unsaved changes'));
   ui.status.textContent = parts.join(' · ');
   ui.status.dataset.state = n > 0 || !st.writable ? 'bad' : st.note && !dirty ? 'ok' : dirty ? 'dirty' : 'idle';
   ui.problems.hidden = n === 0;
@@ -264,6 +272,20 @@ function secGeneral() {
         else home.runsAtHome = false;
       },
       'Switch off for a preview on a computer somewhere else.'
+    ),
+    h('h4', { text: 'Behind a reverse proxy or login page' }),
+    grid(
+      2,
+      field(
+        'Header with the visitor address',
+        input(() => m.settings?.home?.clientIpHeader, (v) => put(child(s(), 'home'), 'clientIpHeader', v.trim()), { mono: true, placeholder: 'x-forwarded-for' }),
+        'Only for a reverse proxy other than Cloudflare, e.g. x-forwarded-for. Used to tell home from away.'
+      ),
+      field(
+        'Host names of your login pages',
+        listInput(() => m.settings?.loginHosts, (arr) => put(s(), 'loginHosts', arr.length ? arr : undefined), { placeholder: 'auth.example.com' }),
+        'E.g. auth.example.com. A check that is redirected there shows "unknown" instead of green.'
+      )
     )
   );
 }
@@ -272,7 +294,7 @@ function renameHost(old, el) {
   const m = st.model;
   const next = el.value.trim();
   if (next === old) return;
-  const problem = !/^[A-Za-z0-9_-]+$/.test(next) ? 'Use only letters, digits, - and _ for a shortcut name.' : Object.hasOwn(m.hosts, next) ? `"${next}" already exists.` : '';
+  const problem = !/^[A-Za-z0-9_-]+$/.test(next) ? t('Use only letters, digits, - and _ for a shortcut name.') : Object.hasOwn(m.hosts, next) ? t('"{name}" already exists.', { name: next }) : '';
   if (problem) {
     el.value = old;
     st.note = problem;
@@ -304,10 +326,10 @@ function secHosts() {
       'div',
       { class: 'cfg-row hosts' },
       h('span', { class: 'cfg-brace' }, h('span', { text: '{' }), name, h('span', { text: '}' })),
-      input(() => hosts[alias], (v) => (hosts[alias] = v), { mono: true, placeholder: '192.168.1.10', label: `Address of ${alias}` }),
-      h('span', { class: 'cfg-used', text: used === 0 ? 'not used' : `used ${used}×` }),
-      iconBtn('trash', `Remove ${alias}`, () => {
-        if (used > 0 && !confirm(`{${alias}} is still used ${used} time${used === 1 ? '' : 's'}. Remove it anyway?`)) return;
+      input(() => hosts[alias], (v) => (hosts[alias] = v), { mono: true, placeholder: '192.168.1.10', label: t('Address of {alias}', { alias }) }),
+      h('span', { class: 'cfg-used', text: used === 0 ? 'not used' : t('used {n}×', { n: used }) }),
+      iconBtn('trash', t('Remove {alias}', { alias }), () => {
+        if (used > 0 && !confirm(t('{alias} is still used {n} time(s). Remove it anyway?', { alias: `{${alias}}`, n: used }))) return;
         delete hosts[alias];
         touched();
         renderForm();
@@ -343,8 +365,8 @@ function secStats() {
           'div',
           { class: 'cfg-row disks' },
           input(() => d.name, (v) => put(d, 'name', v), { placeholder: 'Name', label: 'Name' }),
-          input(() => d.path, (v) => put(d, 'path', v), { mono: true, placeholder: '/pools/Storage', label: 'Path' }),
-          input(() => d.size, (v) => put(d, 'size', v), { mono: true, placeholder: 'size, e.g. 106.6G', label: 'Total size' }),
+          input(() => d.path, (v) => put(d, 'path', v), { mono: true, placeholder: '/pools/tank', label: 'Path' }),
+          input(() => d.size, (v) => put(d, 'size', v), { mono: true, placeholder: 'size, e.g. 3.6T', label: 'Total size' }),
           h(
             'span',
             { class: 'cfg-acts' },
@@ -373,7 +395,7 @@ function secStats() {
     'The tiles at the top of the page. One storage tile per path; the free space is read live, the total size is a number you set.',
     grid(
       2,
-      field('Caption', input(() => m.stats?.name, (v) => put(stats(), 'name', v), { placeholder: 'TrueNAS' })),
+      field('Caption', input(() => m.stats?.name, (v) => put(stats(), 'name', v), { placeholder: 'NAS' })),
       field('Network cards', listInput(() => m.stats?.network, (arr) => put(stats(), 'network', arr.length ? arr : undefined), { placeholder: 'all physical cards' }), 'For the network speed tile, e.g. eno1')
     ),
     h('h4', { text: 'Storage tiles' }),
@@ -410,15 +432,15 @@ function iconPicker(svc, after) {
 
   // An icon that is not in the list: paste the link to its .svg file. The hub downloads it once and keeps it.
   const link = h('input', { type: 'url', class: 'cfg-in mono', placeholder: 'https://…/icon.svg', 'aria-label': 'Link to an SVG icon', spellcheck: 'false', autocomplete: 'off' });
-  const note = h('span', { class: 'cfg-h', text: 'Not in the list? Paste the link to an .svg file, e.g. from dashboard-icons. The hub downloads it once and keeps it.' });
+  const note = h('span', { class: 'cfg-h', text: 'Not in the list? Type the name of an icon from dashboard-icons (it is fetched by itself), or paste the link to an .svg file. The hub downloads it once and keeps it.' });
   const fetchBtn = textBtn(null, 'Add', async () => {
     if (!link.value.trim() || fetchBtn.disabled) return;
     fetchBtn.disabled = true;
     note.classList.remove('bad');
-    note.textContent = 'Downloading…';
+    note.textContent = t('Downloading…');
     try {
       const { status, data } = await api('POST', '/api/config/icon', { url: link.value.trim() });
-      if (status !== 200) throw new Error(data.error ?? `The hub answered with an error (${status}).`);
+      if (status !== 200) throw new Error(data.error ?? t('The hub answered with an error ({status}).', { status }));
       st.icons = data.icons;
       svc.icon = data.name;
       touched();
@@ -474,7 +496,7 @@ function checkField(svc) {
     h('span', { class: 'cfg-l', text: 'Online check' }),
     select,
     custom,
-    h('span', { class: 'cfg-h', text: 'Addresses behind the Cloudflare login always answer, so check the real address (machine and port) instead.' })
+    h('span', { class: 'cfg-h', text: 'Addresses behind a login page always answer, so check the real address (machine and port) instead.' })
   );
 }
 
@@ -490,7 +512,7 @@ function svcForm(svc, refreshHead) {
     grid(2, field('Name', input(() => svc.name, (v) => put(svc, 'name', v), { after: refreshHead })), iconPicker(svc, refreshHead)),
     grid(
       2,
-      field('Public address', addr('url', 'https://app.example.net'), 'Opened when you are away (through Cloudflare). Empty = home network only.'),
+      field('Public address', addr('url', 'https://app.example.net'), 'Opened when you are away. Empty = home network only.'),
       field('Home address', addr('local', 'http://{nas}:8080'), 'Opened instead when you are on the home network. Optional.')
     ),
     grid(
@@ -517,7 +539,7 @@ function svcForm(svc, refreshHead) {
       if (e.target instanceof HTMLInputElement && 'addr' in e.target.dataset) last = e.target;
     });
     const chips = hosts.map((name) => {
-      const b = h('button', { type: 'button', class: 'cfg-chip', text: `{${name}}`, title: `Insert {${name}} (${st.model.hosts[name]})` });
+      const b = h('button', { type: 'button', class: 'cfg-chip', text: `{${name}}`, title: t('Insert {name} ({address})', { name: `{${name}}`, address: st.model.hosts[name] }) });
       b.addEventListener('click', () => {
         const el = last && !last.hidden ? last : form.querySelector('input[data-addr]:not([hidden])');
         if (!el) return;
@@ -543,8 +565,8 @@ function svcItem(svc, i, list, redraw) {
   const tags = h('span', { class: 'cfg-tags' });
   const refreshHead = () => {
     img.src = iconUrl(svc.icon);
-    name.textContent = svc.name || 'Unnamed service';
-    sub.textContent = svc.url || svc.local || 'no address yet';
+    name.textContent = svc.name || t('Unnamed service');
+    sub.textContent = svc.url || svc.local || t('no address yet');
     tags.replaceChildren(
       ...[svc.hidden === true ? 'hidden' : '', !svc.url && svc.local ? 'home only' : ''].filter(Boolean).map((t) => h('span', { class: 'cfg-tag', text: t }))
     );
@@ -571,7 +593,7 @@ function svcItem(svc, i, list, redraw) {
       iconBtn('copy', 'Duplicate', () => {
         const copy = JSON.parse(JSON.stringify(svc));
         delete copy[ID];
-        copy.name = `${svc.name ?? 'Service'} copy`;
+        copy.name = t('{name} copy', { name: svc.name ?? 'Service' });
         list.splice(i + 1, 0, copy);
         st.open.add(copy);
         touched();
@@ -593,7 +615,7 @@ function secGroup(g, gi, groups) {
   const list = Array.isArray(g.services) ? g.services : [];
   // changes inside a group draw only this group again
   const redraw = () => document.getElementById(`cfg-group-${gi}`)?.replaceWith(secGroup(g, gi, groups));
-  const count = h('span', { class: 'cfg-used', text: `${list.length} service${list.length === 1 ? '' : 's'}` });
+  const count = h('span', { class: 'cfg-used', text: list.length === 1 ? t('1 service') : t('{n} services', { n: list.length }) });
   const head = h(
     'div',
     { class: 'cfg-grouphead' },
@@ -605,7 +627,7 @@ function secGroup(g, gi, groups) {
       iconBtn('up', 'Move group up', () => move(groups, gi, -1), { disabled: gi === 0 }),
       iconBtn('down', 'Move group down', () => move(groups, gi, 1), { disabled: gi === groups.length - 1 }),
       iconBtn('trash', 'Remove group', () => {
-        if (list.length > 0 && !confirm(`Remove the group "${g.name ?? ''}" with its ${list.length} service${list.length === 1 ? '' : 's'}?`)) return;
+        if (list.length > 0 && !confirm(t('Remove the group "{name}" with its {n} service(s)?', { name: g.name ?? '', n: list.length }))) return;
         groups.splice(gi, 1);
         touched();
         renderForm();
@@ -634,7 +656,7 @@ function secGroup(g, gi, groups) {
 
 function renderNav() {
   const jump = (label, id, cls = '') => {
-    const b = h('button', { type: 'button', class: cls, text: label });
+    const b = h('button', { type: 'button', class: cls, [cls === 'sub' ? 'rawText' : 'text']: label });
     b.addEventListener('click', () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     return b;
   };
@@ -644,7 +666,7 @@ function renderNav() {
     jump('Hosts', 'cfg-hosts'),
     jump('Server stats', 'cfg-stats'),
     h('div', { class: 'cfg-navtitle', text: 'Groups' }),
-    ...groups.map((g, gi) => (isObject(g) ? jump(g.name || 'Unnamed group', `cfg-group-${gi}`, 'sub') : null))
+    ...groups.map((g, gi) => (isObject(g) ? jump(g.name || t('Unnamed group'), `cfg-group-${gi}`, 'sub') : null))
   );
 }
 
@@ -743,7 +765,7 @@ async function save() {
         const svc = st.model?.groups?.[gi]?.services?.[si];
         if (isObject(svc)) st.open.add(svc);
       }
-      st.note = 'Saved. The hub is using it now.';
+      st.note = t('Saved. The hub is using it now.');
       render();
       ui.main.scrollTop = scroll;
       document.dispatchEvent(new CustomEvent('hub:config-saved'));
@@ -751,21 +773,21 @@ async function save() {
     }
     st.busy = false;
     if (status === 409) {
-      if (confirm(`${data.error}\n\nLoad the new version? Your changes here are lost.`)) return void load();
+      if (confirm(`${tr(data.error)}\n\n${t('Load the new version? Your changes here are lost.')}`)) return void load();
     } else if (status === 422) {
       st.errors = data.errors;
     } else {
-      st.note = data.error ?? `Not saved (${status}).`;
+      st.note = data.error ?? t('Not saved ({status}).', { status });
     }
   } catch (err) {
     st.busy = false;
-    st.note = `Not saved: ${err.message}`;
+    st.note = t('Not saved: {message}', { message: err.message });
   }
   updateStatus();
 }
 
 function requestClose() {
-  if (st && isDirty() && !confirm('Close without saving? Your changes are lost.')) return;
+  if (st && isDirty() && !confirm(t('Close without saving? Your changes are lost.'))) return;
   clearTimeout(validateTimer);
   st = null;
   dlg.close();
@@ -824,7 +846,7 @@ async function load() {
   if (!dlg.open) dlg.showModal();
   try {
     const { status, data } = await api('GET', '/api/config');
-    if (status !== 200) throw new Error(data.error ?? `The hub answered with an error (${status}).`);
+    if (status !== 200) throw new Error(tr(data.error) ?? t('The hub answered with an error ({status}).', { status }));
     adopt(data);
     render();
   } catch (err) {

@@ -1,52 +1,71 @@
 # Homelab Hub
 
-A small self-hosted link page for your homelab: one card per web UI, each with a green/red **Online / Offline** dot.
-Important Docker containers also show their health, and the server's stats (CPU, memory, load, network, storage) are shown at the top.
-Everything you would want to change is in **one YAML file**: [config/services.yaml](config/services.yaml), which you can also edit on the page itself.
+A small self-hosted start page for your homelab: one card per web UI, each with a green/red **Online / Offline** dot.
+Docker containers show their health, and the server's stats (CPU, memory, load, network, storage) sit at the top.
+Everything is configured in **one YAML file**, which you can also edit on the page itself.
 
-- Node.js, one dependency (`yaml`), no build step, no database, nothing loaded from the internet by the page
-- Online checks over HTTP(S) or plain TCP, done by the server, so open tabs cost nothing
-- Container health through a read-only Docker socket proxy
-- Home network detection: at home the cards open the LAN address, away they open the public one
-- Config editor on the page (form or plain YAML), with validation; a broken config never takes the page down
-- Works on any Docker host; extra notes for TrueNAS in [DEPLOY.md](DEPLOY.md)
+![Homelab Hub with demo data](docs/screenshot.png)
+
+<details>
+<summary>Light theme</summary>
+
+![Homelab Hub, light theme](docs/screenshot-light.png)
+
+</details>
+
+- **Online checks** over HTTP(S) or plain TCP, done by the server, so open tabs cost nothing
+- **Container health** through a read-only Docker socket proxy
+- **Cards from Docker labels**: label a container and its card appears by itself
+- **Home network detection**: at home the cards open the LAN address, away the public one
+- **Config editor on the page** (form or plain YAML) with validation; a broken config never takes the page down
+- **Icons by name**: `icon: jellyfin` is fetched once from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) and kept
+- **Optional password login**, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
+- Dark and light theme, English and German
+- Node.js, one dependency (`yaml`), no build step, no database; images for amd64 and arm64 (Raspberry Pi)
 
 ## Quick start (Docker)
 
+Save [compose.yaml](compose.yaml) on your server, then:
+
 ```bash
-git clone https://github.com/YOUR-USERNAME/homelab-hub.git
-cd homelab-hub
-mkdir -p data && sudo chown 1000:1000 data
-docker compose up -d --build
+docker compose up -d
 ```
 
-Open `http://<server>:8080`. The page starts with the example config: open the gear menu → **Edit YAML** and replace the
-example addresses with your own (or edit `data/services.yaml` by hand). For storage tiles, add one mount line per disk or
-pool in [compose.yaml](compose.yaml).
+Open `http://<server>:8080`. The page starts with one example card: open the gear menu (top right) → **Edit YAML** and
+add your own services. The config is stored in `./data/services.yaml`.
 
-TrueNAS: use [compose.truenas.yaml](compose.truenas.yaml) and follow [DEPLOY.md](DEPLOY.md).
+- **Storage tiles:** add one mount line per disk or pool in `compose.yaml` and one entry under `stats.disks`.
+- **TrueNAS:** paste the same file under *Apps → Discover Apps → ⋮ → Install via YAML*; details in [DEPLOY.md](DEPLOY.md).
+- **Just looking?** `npm install && npm run demo` shows the page with made-up data on `http://localhost:8099`.
 
-> **The hub has no login of its own.** Anyone who can reach the port can see the page and use the config editor.
-> Keep it on your home network, and for access from outside put it behind something that authenticates, such as
-> Cloudflare Access (see [DEPLOY.md](DEPLOY.md)). To switch the editor off, set `CONFIG_EDITOR: "off"` in the compose file.
+> **Who can open it?** Without a password, anyone who can reach the port can see the page and edit the config. That is
+> fine on a home network you trust. For anything else, set `HUB_PASSWORD` (below) or put a login proxy in front.
+
+## Password login (optional)
+
+Set these in `compose.yaml` under `environment:`:
+
+| Variable | Meaning |
+|---|---|
+| `HUB_PASSWORD` | The password. Unset or empty = no login |
+| `HUB_PASSWORD_PROTECTS` | `all` (default): the whole page needs the login. `editor`: everyone sees the page, only the config editor needs it |
+
+The login lasts 30 days per browser; changing the password logs everyone out. Five wrong passwords lock that address
+for a minute. Use HTTPS (a reverse proxy) when the hub is reachable from outside your home network: over plain HTTP the
+password travels unencrypted.
 
 ## Edit the config
 
-In Docker the file is `/config/services.yaml` (copied from the example on the first start).
-The page re-reads it every check cycle (about 30 s), no restart. A mistake never breaks the page: it keeps the last
+In Docker the file is `/config/services.yaml` (`./data/services.yaml` on the host), created on the first start.
+[config/services.yaml](config/services.yaml) is a full example with every option.
+The hub re-reads the file every check cycle (about 30 s), no restart. A mistake never breaks the page: it keeps the last
 working version and shows a red box naming the problem.
 
-**On the page:** gear menu → **Edit YAML** opens an editor for the same file. The *Visual* tab is a form (general
-settings, hosts, storage tiles, groups and services with add / remove / reorder / duplicate and an icon picker); the
-*YAML* tab is the plain text. Problems are listed while you type, and a config with problems is not saved. Saving
-applies at once, keeps the comments and layout of everything you did not touch, and leaves the version before in
-`services.yaml.bak`. Two things to know: a comment above the *first* entry of a list stays at the top of that list when
-entries are moved, and a renamed host shortcut loses the comment above it.
-
-**Icons from a link:** in a service's icon picker, paste the link to an `.svg` file (for example one from
-dashboard-icons; a GitHub page link works too) and click *Add*. The hub downloads it once into `icons/` next to the
-config file and serves it itself from then on, so it survives image rebuilds and needs no internet afterwards.
-Only `https` links to SVG files without scripts are accepted.
+**On the page:** gear menu → **Edit YAML**. The *Visual* tab is a form (general settings, hosts, storage tiles, groups
+and services with add / remove / reorder / duplicate and an icon picker); the *YAML* tab is the plain text. Problems
+are listed while you type, and a config with problems is not saved. Saving applies at once, keeps the comments and
+layout of everything you did not touch, and leaves the version before in `services.yaml.bak`.
+To switch the editor off, set `CONFIG_EDITOR: "off"`.
 
 ```yaml
 hosts:
@@ -55,7 +74,7 @@ groups:
   - name: NAS
     services:
       - name: Immich
-        icon: immich                          # file public/icons/immich.svg (default icon if missing)
+        icon: immich                          # an icon name from dashboard-icons
         url: https://photos.example.com       # where the card links to
         local: http://{nas}:2283              # where it links to on the home network
         check: http://{nas}:2283              # what decides the dot
@@ -66,104 +85,156 @@ groups:
 |---|---|
 | `url` | Public address the card opens. Optional if `local` is set |
 | `local` | Address the card opens on the home network (optional; alone = "home network only") |
-| `icon` | Name of an SVG in `public/icons/` (without `.svg`), or one added through the icon picker. Missing name or file = default icon |
+| `icon` | Icon name (see below). Missing = default icon |
 | `check` | `http://…` / `https://…` (online = any answer below 500), `tcp://host:port` (port accepts connections), or `none` |
 | `insecure` | `true` accepts a self-signed certificate on the check (Cockpit, Portainer) |
 | `containers` | Patterns (`*` wildcard) matched against container name, compose project or service name |
 | `hidden` | `true` keeps the entry but hides it |
 | `hosts` | Aliases usable as `{name}` in `url`, `local` and `check` |
 
-**Why `check` is separate from `url`:** services behind Cloudflare Access always answer with the login page, even
-when the service itself is dead. Such a check shows a grey **Unknown** dot. So protected apps are checked at their real
-address (server IP and port). Services without a login in front can be checked through the public address: when the
-tunnel or service is down, Cloudflare answers 502/530.
+**Icons:** write the name of any icon from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
+(`jellyfin`, `home-assistant`, `pi-hole` …). If the hub doesn't have it yet, it downloads the SVG once into `icons/`
+next to the config file and serves it itself from then on. In the editor's icon picker you can also paste a link to any
+`.svg` file. Only SVGs without scripts are accepted. `ICON_DOWNLOAD: "off"` stops the hub from fetching icons by itself.
 
-**Container health states:** `healthy`, `running` (the image has no healthcheck), `starting`, `unhealthy`, `stopped`,
-`no container found` (pattern matches nothing: look at `/api/containers`, linked in the footer, and fix the pattern).
-A group with `autoContainers: true` gives every card a badge when a Docker container matches the card's name
-(`Uptime Kuma` finds `*uptime-kuma*`); a card with its own `containers:` list uses that instead.
+**Container health:** `healthy`, `running` (the image has no healthcheck), `starting`, `unhealthy`, `stopped`,
+`no container found` (the pattern matches nothing: look at `/api/containers`, linked in the footer).
+A group with `autoContainers: true` gives every card a badge when a container matches the card's name
+(`Uptime Kuma` finds `*uptime-kuma*`).
+
+## Cards from Docker labels
+
+Instead of writing a card into the YAML, put labels on the container. The card appears on the next check and goes
+away with the container:
+
+```yaml
+services:
+  grafana:
+    image: grafana/grafana
+    labels:
+      homelab-hub.name: Grafana                      # default: the compose service name
+      homelab-hub.url: https://grafana.example.com   # url and/or local is required
+      homelab-hub.local: http://{nas}:3000           # {host} shortcuts from the YAML work
+      homelab-hub.group: Monitoring                  # default: "Docker"
+      homelab-hub.icon: grafana
+      homelab-hub.check: http://{nas}:3000           # optional, like `check:` in the YAML
+```
+
+Also understood: `homelab-hub.description`, `homelab-hub.insecure: "true"`, `homelab-hub.hide: "true"`.
+Label cards join the group of the same name from the YAML (a card with the same name in the YAML wins), show the
+health of their container, and need the docker-proxy from `compose.yaml`. A label with a mistake is listed under
+`labelErrors` in `/api/containers`. Switch the feature off with `settings.dockerLabels: false`.
 
 ## Home network: local addresses
 
 Give a service a `local:` address and its card opens that address when you are on the home network.
-A service with only `local:` (no `url:`) is shown greyed out as "home network only" when you are away.
+A service with only `local:` is shown greyed out as "home network only" when you are away.
 
 The hub decides per visit, on the server:
 
-1. Opened **directly on the LAN** (`http://192.168.1.10:8080`) = home. (When the hub runs somewhere else than your home
-   server, set `settings.home.runsAtHome: false`: a direct visit is then home only if that machine's public IP is listed in `publicIps`.)
-2. Opened **through Cloudflare** (`hub.example.com`) = home when your public IP is the server's public IP
-   (the hub asks Cloudflare's trace page for it, every 10 min), or one of `settings.home.publicIps` in the YAML.
-3. Otherwise away. The button at the top (**Home network / Away · auto**) switches Auto → Home → Away and remembers the choice in that browser.
+1. Opened **directly on the LAN** (`http://192.168.1.10:8080`) = home.
+2. Opened **through a proxy or tunnel** = home when your address is a private one (a proxy on your LAN), or when your
+   public IP is the server's public IP or one of `settings.home.publicIps`.
+3. Otherwise away. The button at the top (**Home network / Away · auto**) switches Auto → Home → Away and remembers
+   the choice in that browser.
 
-Why the server and not the browser: an https page may not probe `http://192.168.x.x` (mixed content), so the page cannot test for itself.
-Rule 2 can be wrong (VPN, a second internet line): then add your IP to `publicIps` or use the switch. IPv6 visitors are treated as away unless listed.
-Only the links change; the hub page itself is not redirected.
+For rule 2 the hub must learn the visitor's address from the proxy. Cloudflare's header is understood out of the box;
+for another proxy (Caddy, Traefik, Nginx Proxy Manager …) name its header:
+
+```yaml
+settings:
+  home:
+    clientIpHeader: x-forwarded-for     # or x-real-ip
+```
+
+The setting only decides which links the cards show. It is not a security feature.
+
+## Behind a login proxy
+
+Services behind a login proxy answer with the login page even when the service itself is dead, so checking their public
+address says nothing. The hub shows such a check as a grey **Unknown** dot instead of a false green one: for Cloudflare
+Access automatically, for your own login page when you list its host name:
+
+```yaml
+settings:
+  loginHosts: [auth.example.com]        # Authelia, Authentik, Keycloak ...
+```
+
+The fix is always the same: point `check:` at the service itself (server IP and port).
+
+## Appearance and language
+
+Gear menu → *Appearance*: theme (automatic / dark / light) and language (automatic / English / Deutsch), remembered per
+browser. `settings.language: de` in the YAML sets the default for everyone who has not chosen.
+Texts that come from the server (config problems, some check details) are English.
+Another language is one block in [public/i18n.js](public/i18n.js); see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Run it without Docker
 
 ```bash
 npm install
 npm test                      # no network needed
-npm run local                 # http://localhost:1212 (set PORT to change) with config/local.yaml (a copy of services.yaml, made on the first run)
-node scripts/dev-fakes.mjs    # http://localhost:8099 with fake Docker + /proc data
+npm run demo                  # http://localhost:8099 with made-up services, containers and stats
+npm run local                 # http://localhost:1212 with config/local.yaml (a copy of the example, made on the first run)
 ```
 
-`npm run local` runs real checks against the addresses in the config. On Windows and macOS there is no `/proc`, so the stats
-tiles show **this computer's** numbers (captioned "This computer · local preview"), and without Docker the container badges show "?".
-`config/local.yaml` is git-ignored, so you can put your real addresses there.
+`npm run local` runs real checks against the addresses in `config/local.yaml` (git-ignored, so your real addresses can
+go there). On Windows and macOS there is no `/proc`, so the stats tiles show this computer's numbers, and without
+Docker there are no container badges.
 
-Environment variables: `PORT` (8080), `CONFIG_PATH`, `DEFAULT_CONFIG_PATH`, `DOCKER_HOST` (empty = no container health),
-`PROC_PATH` (`/proc`), `SYS_PATH` (`/sys`), `CONFIG_EDITOR` (`off` disables the editor).
+Environment variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PORT` | `8080` | Port to listen on |
+| `CONFIG_PATH` | `config/services.yaml` (`/config/services.yaml` in Docker) | The config file |
+| `DEFAULT_CONFIG_PATH` | | Copied to `CONFIG_PATH` when that doesn't exist yet |
+| `DOCKER_HOST` | empty | Docker API (`http://docker-proxy:2375`); empty = no container health, no label cards |
+| `PROC_PATH`, `SYS_PATH` | `/proc`, `/sys` | Where the host's stats are mounted |
+| `HUB_PASSWORD`, `HUB_PASSWORD_PROTECTS` | | Login, see above |
+| `CONFIG_EDITOR` | on | `off` removes the editor |
+| `ICON_DOWNLOAD` | on | `off` never fetches icons |
+| `PUID`, `PGID` | `1000` | Docker only: the user the hub runs as |
 
 ## Open it like an app on Windows (taskbar)
 
 ```bash
-powershell -ExecutionPolicy Bypass -File scripts\windows-shortcut.ps1 -Url https://hub.example.com/ -ProfileEmail you@example.com
+powershell -ExecutionPolicy Bypass -File scripts\windows-shortcut.ps1 -Url https://hub.example.com/
 ```
 
-Creates a **Homelab Hub** shortcut (Start menu and desktop) that opens the hub in its own Chrome window (no tabs, no
-address bar) with the hub's icon. `-ProfileEmail` picks the Chrome profile signed in with that Google account;
-`-ProfileDir "Profile 1"` names the profile folder instead. Pin it to the taskbar by hand: right-click the shortcut →
-**Pin to taskbar** (Windows 11: *Show more options* first).
+Creates a **Homelab Hub** shortcut (Start menu and desktop) that opens the hub in its own Chrome window with the hub's
+icon. `-ProfileEmail you@example.com` or `-ProfileDir "Profile 1"` picks the Chrome profile. Pin it to the taskbar by
+hand: right-click the shortcut → **Pin to taskbar**.
 
 ## How it works
 
 `src/monitor.js` checks everything on a timer and keeps the result in memory; the page (`public/`) only reads
-`/api/status`. Container health comes from Docker through a read-only socket proxy
+`/api/status`. Container health and labels come from Docker through a read-only socket proxy
 (`tecnativa/docker-socket-proxy` allows only "list containers"). Host stats are read from the host's `/proc` and `/sys`.
 
-- **Network** tile: download / upload speed, averaged over the last check cycle, summed over the physical network cards
-  (read from the host's `/sys/class/net`). Pick cards with `stats.network: [eno1]` in the YAML.
-- **Groups open and close:** click a group's name. A dot shows its state: green all online, amber some offline, red all offline.
-  A group whose services are all offline starts closed; your own choice is remembered in the browser. A search opens everything.
-- **Pins:** the pin button on a card (hover) puts it into a **Pinned** section at the top. Pins are remembered
-  in that browser (localStorage), so each device has its own.
-- **Storage:** one tile per entry in `stats.disks`, each pointing at a folder mounted read-only into the container
-  (the hub only asks for free space). The tile shows **used / total** with a bar when the entry has a `size:`
-  (e.g. `size: 3.6T`): a container can't read a ZFS pool's total, so you set it once. On a ZFS host get it with
-  `zfs list -Hp -o name,used,avail -d 0` (size = used + avail). Without `size:` the tile shows just the free space.
-- **Memory** "used" leaves out the ZFS cache (ARC), which is shown separately; otherwise a ZFS box always looks ~90 % full.
-- **Load** = how many tasks on average are running or waiting for a CPU thread. The bar is the 1-minute value against the thread count.
-- **Gear menu** (top right): choose what the page shows and how often it refreshes (saved in that browser only). Two
-  timers on the server decide how fresh the data can be: stats every `statsIntervalSeconds` (default 5 s), services and
+- **Network** tile: download / upload speed over the physical network cards. Pick cards with `stats.network: [eno1]`.
+- **Groups open and close:** click a group's name. A group whose services are all offline starts closed.
+- **Pins:** the pin button on a card puts it into a **Pinned** section at the top, remembered per browser.
+- **Storage:** one tile per entry in `stats.disks`, each pointing at a folder mounted read-only into the container.
+  With `size:` (e.g. `size: 3.6T`) the tile shows used / total and a bar: a container can't read a ZFS pool's total, so
+  you set it once (`zfs list -Hp -o name,used,avail -d 0`, size = used + avail).
+- **Memory** "used" leaves out the ZFS cache (ARC), which is shown separately.
+- **Two timers** decide how fresh the data is: stats every `statsIntervalSeconds` (default 5 s), services and
   containers every `checkIntervalSeconds` (default 30 s).
-
-## Files
 
 | Path | What |
 |---|---|
-| `config/services.yaml` | The example config (copied to the config folder on first start) |
-| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `editor.js` (config editor API), `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection) |
-| `public/` | The page: `index.html`, `style.css`, `app.js`; the config editor: `editor.js`, `editor.css`; `icons/` |
+| `config/services.yaml`, `config/starter.yaml` | Full example config; the small one a new install starts with |
+| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `icons.js`, `editor.js` (config editor API) |
+| `public/` | The page: `index.html`, `app.js`, `style.css`, `i18n.js` (translations), `theme.js`, the login page, the config editor, `icons/` |
 | `test/` | `node --test` suites, with fake servers and `/proc` fixtures |
-| `Dockerfile`, `compose.yaml` | Docker deployment |
-| `compose.truenas.yaml`, `scripts/`, `DEPLOY.md` | TrueNAS deployment |
+| `Dockerfile`, `docker-entrypoint.sh`, `compose.yaml` | Docker |
+| `compose.truenas.yaml`, `scripts/`, `DEPLOY.md` | Building on a TrueNAS box, helper scripts |
 
-## Credits and license
+## Contributing, credits, license
 
-Code: [MIT](LICENSE).
+Bug reports and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Code: [MIT](LICENSE).
 
 Most icons in `public/icons/` come from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0).
-The logos are trademarks of their respective owners and are used here only to identify the services.
+The logos are trademarks of their respective owners and are used only to identify the services.
 `default`, `todo-sync`, `light`, `alarm`, `bluemap` and `terminal` were drawn for this project.

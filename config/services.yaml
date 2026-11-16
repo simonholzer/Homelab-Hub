@@ -19,6 +19,16 @@ settings:
     # when your public IP is the server's public IP. If that is wrong for you (second internet line, VPN),
     # list extra public IPs here, or use the Auto / Home / Away switch at the top of the page.
     publicIps: []
+    # Behind a reverse proxy other than Cloudflare (Caddy, Traefik, Nginx Proxy Manager ...): the header
+    # in which the proxy passes the visitor's address. Cloudflare's own header is always understood.
+    # clientIpHeader: x-forwarded-for
+  # Host names of your own login pages (Authelia, Authentik ...): a check that gets redirected there
+  # shows a grey "unknown" dot instead of a false green one. Cloudflare Access is recognised by itself.
+  # loginHosts: [auth.example.com]
+  # Cards from Docker labels (homelab-hub.url, homelab-hub.name ..., see the README). On by default.
+  # dockerLabels: false
+  # Language for browsers that have not chosen one in the gear menu: auto (the browser's), en, de.
+  # language: auto
 
 # Address shortcuts. Use them as {nas} / {pi} in url: and check: below.
 # Moving a machine to a new IP = change one line here.
