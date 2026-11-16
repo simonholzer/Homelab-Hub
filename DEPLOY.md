@@ -11,8 +11,19 @@ Things you may want to change in the YAML (Apps → homelab-hub → **Edit**):
 - one mount line per pool for the storage tiles, e.g. `- /mnt/tank:/pools/tank:ro`
 - `hub-config:/config` → a dataset path such as `/mnt/tank/appdata/homelab-hub:/config`, if you want the config as
   files in a dataset (for snapshots and replication) instead of in a Docker volume. The container fixes the owner of
-  that folder by itself. Do this before you set things up: a new folder starts with an empty config. To update, pull the
-new image in the app's menu. To stay on one version, write it instead of `latest` in the image line (e.g. `:1.3.0`).
+  that folder by itself. Do this before you set things up: a new folder starts with an empty config. To stay on one version, write it instead of `latest` in the image line (e.g. `:1.3.0`).
+
+**Updating.** TrueNAS does not notice a new `latest` image by itself, and the app's own "Update" entry stays grey.
+Either way takes a minute:
+
+- **With `latest`:** Apps → **Configuration → Manage Container Images → Pull Image**, image name
+  `ghcr.io/simonholzer/homelab-hub`, tag `latest`, Save. Then Apps → homelab-hub → **Edit → Save** (without changing
+  anything): that recreates the container with the new image. A plain *Restart* is not enough.
+- **With a fixed version:** Apps → homelab-hub → **Edit**, change the version in the image line (e.g. `:1.3.0` →
+  `:1.4.0`), Save. TrueNAS pulls it and recreates the container.
+
+Your config, icons and password are kept in both cases. The gear menu of the hub shows the running version and a link
+when a newer one exists.
 
 To show the stats of other machines too, run [compose.agent.yaml](compose.agent.yaml) on them (README, "Stats from
 other machines"). On a second TrueNAS box that is another custom app with that file. The rest of this page is only needed for the other way.
