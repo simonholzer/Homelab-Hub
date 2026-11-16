@@ -46,6 +46,15 @@ New text in the page goes through `t('…')` (in the config editor, `h()` transl
 Icons are not added to the repository any more: the hub fetches them by name from
 [dashboard-icons](https://github.com/homarr-labs/dashboard-icons). If one is missing there, contribute it upstream.
 
+## Making a release (maintainers)
+
+1. Add a section for the version at the top of `CHANGELOG.md` and set the same version in `package.json`
+   (`npm version 1.2.0 --no-git-tag-version` also updates the lock file). Commit and push.
+2. Tag that commit and push the tag: `git tag v1.2.0 && git push origin v1.2.0`.
+
+The tag does the rest: the "Docker image" workflow publishes `:1.2.0`, `:1.2` and `:1`, and the "Release" workflow
+creates the GitHub release with the notes from the changelog.
+
 ## Reporting a bug
 
 Please include the hub's version or image tag, how it runs (Docker, TrueNAS, Node), the relevant part of the config

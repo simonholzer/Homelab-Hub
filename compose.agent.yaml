@@ -5,7 +5,7 @@
 #   3. on the hub, add the machine under stats.machines in the YAML (see the README)
 services:
   homelab-hub-agent:
-    image: ghcr.io/simonholzer/homelab-hub:latest
+    image: ghcr.io/simonholzer/homelab-hub:latest   # or a fixed version, e.g. :1.1.0
     restart: unless-stopped
     ports:
       - "8081:8080"             # the hub asks http://<this machine>:8081

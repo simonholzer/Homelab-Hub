@@ -1,0 +1,43 @@
+name: Release
+
+# Pushing a tag like v1.2.0 creates the GitHub release for it, with the notes of that version from
+# CHANGELOG.md. (The Docker image of the version is built by the "Docker image" workflow.)
+# "Run workflow" with a tag name does the same for a tag that already exists.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to make a release for, e.g. v1.0.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # the changelog of the branch the workflow runs from (for a pushed tag: the tagged commit)
+      - uses: actions/checkout@v4
+      - name: Notes of this version from CHANGELOG.md
+        run: |
+          version="${TAG#v}"
+          awk -v v="$version" '
+            /^## / { on = ($2 == v) ; next }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then echo "Version $version." > notes.md; fi
+          printf '\n**Docker image:** `ghcr.io/%s:%s`\n' "$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" "$version" >> notes.md
+          cat notes.md
+      - name: Create the release
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file notes.md --verify-tag
+          fi

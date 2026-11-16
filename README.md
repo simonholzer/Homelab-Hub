@@ -39,6 +39,17 @@ add your own services. The config is stored in `./data/services.yaml`.
 - **TrueNAS:** paste the same file under *Apps → Discover Apps → ⋮ → Install via YAML*; details in [DEPLOY.md](DEPLOY.md).
 - **Just looking?** `npm install && npm run demo` shows the page with made-up data on `http://localhost:8099`.
 
+**Versions and updates:** `compose.yaml` uses the tag `latest`, which follows the newest state of the project. To
+stay on a version until you decide to move, write it instead, e.g. `ghcr.io/simonholzer/homelab-hub:1.1.0` (also
+`:1.1` for the newest 1.1.x and `:1` for the newest 1.x). All versions and what changed are under
+[Releases](https://github.com/simonholzer/Homelab-Hub/releases) and in [CHANGELOG.md](CHANGELOG.md). To update:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Your config in `./data` is kept.
+
 > **Who can open it?** Without a password, anyone who can reach the port can see the page and edit the config. That is
 > fine on a home network you trust. For anything else, set `HUB_PASSWORD` (below) or put a login proxy in front.
 
@@ -62,8 +73,10 @@ In Docker the file is `/config/services.yaml` (`./data/services.yaml` on the hos
 The hub re-reads the file every check cycle (about 30 s), no restart. A mistake never breaks the page: it keeps the last
 working version and shows a red box naming the problem.
 
-**On the page:** gear menu → **Edit YAML**. The *Visual* tab is a form (general settings, hosts, storage tiles, groups
-and services with add / remove / reorder / duplicate and an icon picker); the *YAML* tab is the plain text. Problems
+**On the page:** gear menu → **Edit YAML**. The *Visual* tab is a form for everything in the file: general settings
+(timing, home network, reverse proxy, language, Docker labels), hosts, server stats with storage tiles and other
+machines, and groups and services with add / remove / reorder / duplicate and an icon picker. The *YAML* tab is the
+same file as plain text. Problems
 are listed while you type, and a config with problems is not saved. Saving applies at once, keeps the comments and
 layout of everything you did not touch, and leaves the version before in `services.yaml.bak`.
 To switch the editor off, set `CONFIG_EDITOR: "off"`.
@@ -135,7 +148,7 @@ hub with that machine's numbers.
 **On the other machine:** save [compose.agent.yaml](compose.agent.yaml) as `compose.yaml` and run `docker compose up -d`
 (or without Docker: `HUB_MODE=agent PORT=8081 node src/server.js`).
 
-**On the hub**, in the YAML (or gear menu → Edit YAML → *Server stats* → *Other machines*):
+**On the hub:** gear menu → Edit YAML → *Server stats* → *Other machines* → **Add machine**, or in the YAML:
 
 ```yaml
 stats:
@@ -211,7 +224,7 @@ Another language is one block in [public/i18n.js](public/i18n.js); see [CONTRIBU
 ```bash
 npm install
 npm test                      # no network needed
-npm run demo                  # http://localhost:8099 with made-up services, containers and stats
+npm run demo                  # http://localhost:8099 with made-up services, containers, stats and a second machine
 npm run local                 # http://localhost:1212 with config/local.yaml (a copy of the example, made on the first run)
 ```
 
@@ -268,6 +281,7 @@ hand: right-click the shortcut → **Pin to taskbar**.
 | `test/` | `node --test` suites, with fake servers and `/proc` fixtures |
 | `Dockerfile`, `docker-entrypoint.sh`, `compose.yaml`, `compose.agent.yaml` | Docker: the hub, and the agent for other machines |
 | `compose.truenas.yaml`, `scripts/`, `DEPLOY.md` | Building on a TrueNAS box, helper scripts |
+| `CHANGELOG.md`, `.github/workflows/` | What changed per version; tests, image build and release on GitHub |
 
 ## Contributing, credits, license
 
