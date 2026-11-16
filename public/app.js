@@ -243,14 +243,31 @@ function statBox(label, value, note, opts = {}) {
 
 function renderStats() {
   const s = data?.stats;
+  const machines = (data?.machines ?? []).filter((m) => m.stats || m.error);
   els.stats.replaceChildren();
-  els.stats.hidden = !s || !prefs.stats;
-  if (!s || !prefs.stats) return;
-  const caption = s.source === 'os' ? t('This computer · local preview') : data.statsLabel;
-  if (caption) {
-    const title = s.source === 'os' ? t('No /proc here (Windows/macOS), so these are the numbers of the computer running the hub, not of your server.') : '';
-    els.stats.append(h('div', { class: 'stats-title', title, text: caption }));
+  els.stats.hidden = (!s && machines.length === 0) || !prefs.stats;
+  if (els.stats.hidden) return;
+  if (s) {
+    const preview = s.source === 'os';
+    appendStats(
+      s,
+      preview ? t('This computer · local preview') : data.statsLabel,
+      preview ? t('No /proc here (Windows/macOS), so these are the numbers of the computer running the hub, not of your server.') : ''
+    );
   }
+  // the other machines (stats.machines in the YAML), each with its own caption
+  for (const m of machines) {
+    if (m.stats) appendStats(m.stats, m.name);
+    else {
+      els.stats.append(h('div', { class: 'stats-title', text: m.name }));
+      els.stats.append(statBox(t('Stats'), t('unreachable'), t(m.error)));
+    }
+  }
+}
+
+/** One machine's tiles, under its caption. */
+function appendStats(s, caption, title = '') {
+  if (caption) els.stats.append(h('div', { class: 'stats-title', title, text: caption }));
   if (s.cpuPercent != null) {
     const note = [s.cores ? t('{n} threads', { n: s.cores }) : '', s.cpuTempC != null ? `${s.cpuTempC} °C` : ''].filter(Boolean).join(' · ');
     els.stats.append(statBox(t('CPU'), `${s.cpuPercent} %`, note, { pct: s.cpuPercent, wide: true }));

@@ -89,6 +89,28 @@ await new Promise((r) => docker.listen(0, '127.0.0.1', r));
 const up = `http://127.0.0.1:${services.address().port}/up`;
 const down = `http://127.0.0.1:${services.address().port}/down`;
 
+// a second machine: the same program in agent mode, with its own made-up numbers
+const proc2 = path.join(tmp, 'proc-pi');
+fs.mkdirSync(proc2);
+fs.writeFileSync(path.join(proc2, 'meminfo'), 'MemTotal: 8388608 kB\nMemAvailable: 5242880 kB\n');
+fs.writeFileSync(path.join(proc2, 'loadavg'), '0.31 0.22 0.18 1/210 1\n');
+fs.writeFileSync(path.join(proc2, 'uptime'), '432100.00 800000.00\n');
+let busy2 = 0;
+let idle2 = 0;
+const writeCpu2 = () => {
+  busy2 += 900;
+  idle2 += 9100;
+  fs.writeFileSync(path.join(proc2, 'stat'), `cpu ${busy2} 0 0 ${idle2} 0 0 0 0\ncpu0 1 0 0 1 0 0 0 0\ncpu1 1 0 0 1 0 0 0 0\ncpu2 1 0 0 1 0 0 0 0\ncpu3 1 0 0 1 0 0 0 0\n`);
+};
+writeCpu2();
+setInterval(writeCpu2, 500).unref();
+const agentPort = Number(process.env.PORT ?? 8099) + 1;
+const agent = spawn(process.execPath, ['src/server.js'], {
+  cwd: root,
+  stdio: 'inherit',
+  env: { ...process.env, HUB_MODE: 'agent', PORT: String(agentPort), HOST: '127.0.0.1', PROC_PATH: proc2, SYS_PATH: path.join(tmp, 'sys-pi'), AGENT_TOKEN: 'demo-token' }
+});
+
 const config = path.join(tmp, 'services.yaml');
 fs.writeFileSync(config, `# Demo config, written by scripts/demo.mjs. Edit it while the demo runs.
 title: Homelab Hub
@@ -103,6 +125,12 @@ stats:
   disks:
     - { name: tank, path: "${disk}", size: ${Math.round(freeGb * 2.4)}G }
     - { name: backup, path: "${disk}", size: ${Math.round(freeGb * 1.25)}G }
+  machines:
+    - name: Raspberry Pi
+      url: "http://127.0.0.1:${agentPort}"
+      token: demo-token
+      disks:
+        - { name: SD card, path: "${disk}", size: ${Math.round(freeGb * 1.7)}G }
 
 groups:
   - name: NAS
@@ -138,6 +166,7 @@ const child = spawn(process.execPath, ['src/server.js'], {
   }
 });
 console.log(`[demo] made-up data. Config you can edit live: ${config}`);
-process.on('SIGINT', () => child.kill());
-process.on('SIGTERM', () => child.kill());
-child.on('exit', (code) => process.exit(code ?? 0));
+const stop = () => (child.kill(), agent.kill());
+process.on('SIGINT', stop);
+process.on('SIGTERM', stop);
+child.on('exit', (code) => (agent.kill(), process.exit(code ?? 0)));

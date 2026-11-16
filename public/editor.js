@@ -381,6 +381,36 @@ function secStats() {
         )
       : null
   );
+  const machines = Array.isArray(m.stats?.machines) ? m.stats.machines : [];
+  const machineRows = machines.map((mc, i) =>
+    isObject(mc)
+      ? h(
+          'div',
+          { class: 'cfg-row disks' },
+          input(() => mc.name, (v) => put(mc, 'name', v), { placeholder: 'Name', label: 'Name' }),
+          input(() => mc.url, (v) => put(mc, 'url', v.trim()), { mono: true, placeholder: 'http://{pi}:8080', label: 'Address of the agent' }),
+          input(() => mc.token, (v) => put(mc, 'token', v.trim()), { mono: true, placeholder: 'token (optional)', label: 'Token' }),
+          h(
+            'span',
+            { class: 'cfg-acts' },
+            iconBtn('up', 'Move up', () => move(machines, i, -1), { disabled: i === 0 }),
+            iconBtn('down', 'Move down', () => move(machines, i, 1), { disabled: i === machines.length - 1 }),
+            iconBtn('trash', 'Remove', () => {
+              machines.splice(i, 1);
+              if (machines.length === 0) delete stats().machines;
+              touched();
+              renderForm();
+            }, { danger: true })
+          )
+        )
+      : null
+  );
+  const addMachine = textBtn('plus', 'Add machine', () => {
+    if (!Array.isArray(stats().machines)) stats().machines = [];
+    stats().machines.push({ name: '', url: '' });
+    touched();
+    renderForm();
+  });
   const add = textBtn('plus', 'Add storage tile', () => {
     if (!Array.isArray(stats().disks)) stats().disks = [];
     stats().disks.push({ name: '', path: '' });
@@ -400,7 +430,11 @@ function secStats() {
     ),
     h('h4', { text: 'Storage tiles' }),
     ...rows,
-    h('div', { class: 'cfg-add' }, add)
+    h('div', { class: 'cfg-add' }, add),
+    h('h4', { text: 'Other machines' }),
+    h('p', { class: 'cfg-desc', text: 'Machines that run the hub in agent mode (HUB_MODE=agent). Their numbers are shown below this one\'s. Storage tiles of another machine are set in the YAML tab (disks: under the machine).' }),
+    ...machineRows,
+    h('div', { class: 'cfg-add' }, addMachine)
   );
 }
 

@@ -44,6 +44,29 @@ export function parseSize(value) {
   return bytes > 0 ? bytes : null;
 }
 
+/** A `disks:` list (of the hub itself or of another machine) -> [{name, path, sizeBytes?}]. */
+function normalizeDisks(list, where, errors) {
+  const disks = [];
+  if (list != null && !Array.isArray(list)) {
+    errors.push(`${where}: must be a list`);
+    return disks;
+  }
+  for (const [i, d] of (list ?? []).entries()) {
+    if (!d || typeof d.path !== 'string') {
+      errors.push(`${where}[${i}]: needs a path`);
+      continue;
+    }
+    const disk = { name: String(d.name ?? d.path), path: d.path };
+    if (d.size != null) {
+      const bytes = parseSize(d.size);
+      if (bytes == null) errors.push(`${where}[${i}].size: "${d.size}" is not a size like 106.6G or 1.5T`);
+      else disk.sizeBytes = bytes;
+    }
+    disks.push(disk);
+  }
+  return disks;
+}
+
 function number(value, fallback, min, max, where, errors) {
   if (value == null) return fallback;
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
@@ -143,19 +166,31 @@ export function normalizeConfig(raw) {
   if (!LANGUAGES.includes(language)) errors.push(`settings.language: must be one of ${LANGUAGES.join(', ')}`);
   settings.language = LANGUAGES.includes(language) ? language : 'auto';
 
-  const disks = [];
-  for (const [i, d] of (raw.stats?.disks ?? []).entries()) {
-    if (!d || typeof d.path !== 'string') {
-      errors.push(`stats.disks[${i}]: needs a path`);
+  const disks = normalizeDisks(raw.stats?.disks, 'stats.disks', errors);
+
+  // Other machines whose numbers are shown too: each runs this program in agent mode (see agent.js).
+  const machines = [];
+  const machinesRaw = raw.stats?.machines;
+  if (machinesRaw != null && !Array.isArray(machinesRaw)) errors.push('stats.machines: must be a list');
+  for (const [i, m] of (Array.isArray(machinesRaw) ? machinesRaw : []).entries()) {
+    const where = `stats.machines[${i}]`;
+    if (!m || typeof m.url !== 'string' || !m.url.trim()) {
+      errors.push(`${where}: needs a url (the address of the agent, e.g. http://{pi}:8080)`);
       continue;
     }
-    const disk = { name: String(d.name ?? d.path), path: d.path };
-    if (d.size != null) {
-      const bytes = parseSize(d.size);
-      if (bytes == null) errors.push(`stats.disks[${i}].size: "${d.size}" is not a size like 106.6G or 1.5T`);
-      else disk.sizeBytes = bytes;
+    const url = interpolate(m.url.trim(), hosts, `${where}.url`, errors);
+    if (!isHttpUrl(url)) {
+      errors.push(`${where}.url: must be a full http:// or https:// address`);
+      continue;
     }
-    disks.push(disk);
+    if (m.hidden === true) continue;
+    machines.push({
+      name: String(m.name ?? new URL(url).hostname),
+      url,
+      token: m.token == null ? '' : String(m.token),
+      disks: normalizeDisks(m.disks, `${where}.disks`, errors),
+      network: asList(m.network).filter((n) => /^[\w.:@-]+$/.test(n))
+    });
   }
 
   const groups = [];
@@ -230,6 +265,7 @@ export function normalizeConfig(raw) {
       stats: {
         name: raw.stats?.name == null ? '' : String(raw.stats.name),
         disks,
+        machines,
         // network cards to count (default: all physical ones)
         network: asList(raw.stats?.network).map(String).filter((n) => /^[\w.:@-]+$/.test(n))
       },

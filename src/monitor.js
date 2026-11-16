@@ -5,12 +5,13 @@ import { parseConfigText, ensureConfigFile, servicesFromLabels, DEFAULT_SETTINGS
 import { runCheck } from './checks.js';
 import { listContainers, summarizeContainers, autoContainerPatterns } from './docker.js';
 import { StatsReader } from './stats.js';
+import { fetchMachineStats } from './agent.js';
 
 const EMPTY_CONFIG = {
   title: 'Homelab Hub',
   subtitle: '',
   settings: { ...DEFAULT_SETTINGS },
-  stats: { disks: [] },
+  stats: { disks: [], machines: [] },
   groups: []
 };
 
@@ -25,6 +26,7 @@ export class Monitor {
    * @param {Function} [o.check]          override for tests: (check, timeoutMs) => result
    * @param {Function} [o.containers]     override for tests: () => Promise<container[]>
    * @param {object}   [o.statsReader]    override for tests: {read(disks)}
+   * @param {Function} [o.fetchMachine]   override for tests: (machine, timeoutMs) => stats of another machine
    */
   constructor(o) {
     this.configPath = o.configPath;
@@ -33,6 +35,8 @@ export class Monitor {
     this.check = o.check ?? runCheck;
     this.listContainers = o.containers ?? (() => listContainers(this.dockerHost));
     this.statsReader = o.statsReader ?? new StatsReader({ procPath: o.procPath, sysPath: o.sysPath });
+    this.fetchMachine = o.fetchMachine ?? fetchMachineStats;
+    this.machineStats = []; // other machines: [{name, stats, error}]
     this.config = EMPTY_CONFIG;
     this.configError = null;
     this.configLoadedAt = null;
@@ -175,9 +179,27 @@ export class Monitor {
     this.statsBusy = true;
     try {
       const { config } = this;
-      this.stats = await this.statsReader.read(config.stats.disks, { interfaces: config.stats.network });
-      this.statsError = null;
-      this.statsAt = Date.now();
+      const machines = config.stats.machines ?? [];
+      const timeoutMs = config.settings.timeoutSeconds * 1000;
+      // this machine and the others at the same time; one that fails never holds up the rest
+      const [own, others] = await Promise.all([
+        this.statsReader.read(config.stats.disks, { interfaces: config.stats.network }).then(
+          (stats) => ({ stats }),
+          (err) => ({ error: err.message })
+        ),
+        Promise.all(
+          machines.map((m) =>
+            this.fetchMachine(m, timeoutMs).then(
+              (stats) => ({ name: m.name, stats, error: null }),
+              (err) => ({ name: m.name, stats: null, error: err.message })
+            )
+          )
+        )
+      ]);
+      this.machineStats = others;
+      this.stats = own.stats ?? null;
+      this.statsError = own.error ?? null;
+      if (own.stats) this.statsAt = Date.now();
     } catch (err) {
       this.stats = null;
       this.statsError = err.message;
@@ -239,6 +261,7 @@ export class Monitor {
       groups,
       stats: this.stats,
       statsLabel: config.stats.name,
+      machines: this.machineStats,
       statsError: this.statsError,
       dockerError: this.dockerError
     };

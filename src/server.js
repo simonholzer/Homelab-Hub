@@ -12,6 +12,8 @@ import { HomeNetwork } from './network.js';
 import { createConfigApi, fromOwnPage, readBody } from './editor.js';
 import { createAuth, PUBLIC_PATHS, safeNext } from './auth.js';
 import { createIconFetcher } from './icons.js';
+import { createAgentApp, AGENT_PATH } from './agent.js';
+import { StatsReader } from './stats.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -272,7 +274,27 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
   });
 }
 
+/** HUB_MODE=agent: no page, only this machine's numbers for a hub somewhere else (see agent.js). */
+function agentMain() {
+  const token = process.env.AGENT_TOKEN ?? '';
+  const reader = new StatsReader({ procPath: process.env.PROC_PATH ?? '/proc', sysPath: process.env.SYS_PATH ?? '/sys' });
+  const server = createAgentApp({ reader, token });
+  const port = Number(process.env.PORT ?? 8080);
+  const host = process.env.HOST ?? '0.0.0.0';
+  server.listen(port, host, () => {
+    console.log(`[agent] answering the hub on http://${host.includes(':') ? `[${host}]` : host}:${port}${AGENT_PATH}`);
+    if (!token) console.log('[agent] no token set (AGENT_TOKEN): anyone who can reach this port can read the numbers');
+  });
+  const shutdown = () => {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 2000).unref();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+}
+
 function main() {
+  if ((process.env.HUB_MODE ?? '').toLowerCase() === 'agent') return agentMain();
   const monitor = new Monitor({
     configPath: process.env.CONFIG_PATH ?? path.join(root, 'config', 'services.yaml'),
     defaultConfigPath: process.env.DEFAULT_CONFIG_PATH ?? path.join(root, 'config', 'services.yaml'),

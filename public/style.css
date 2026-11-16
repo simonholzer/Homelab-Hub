@@ -230,6 +230,7 @@ h1 { margin: 0; font-size: 1.5rem; font-weight: 650; letter-spacing: -0.02em; }
   margin-bottom: 26px;
 }
 .stats-title { grid-column: 1 / -1; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em; margin-bottom: -2px; }
+.stats-title:not(:first-child) { margin-top: 10px; }
 .stat {
   background: var(--panel);
   border: 1px solid var(--border);
