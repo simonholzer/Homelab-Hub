@@ -1,0 +1,23 @@
+# Homelab Hub agent: run this on ANOTHER machine whose CPU, memory, load, network and storage
+# the hub should show too. It has no page and no config; it only answers the hub.
+#   1. save this file as compose.yaml on that machine
+#   2. docker compose up -d
+#   3. on the hub, add the machine under stats.machines in the YAML (see the README)
+services:
+  homelab-hub-agent:
+    image: ghcr.io/simonholzer/homelab-hub:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8080"             # the hub asks http://<this machine>:8081
+    volumes:
+      - /proc:/host/proc:ro     # CPU, memory, load, uptime
+      - /sys:/host/sys:ro       # CPU temperature, network cards
+      # Storage tiles: mount what the hub should report the free space of (read-only; only the
+      # free space is read). The paths on the right are the ones you write on the hub (disks: path:).
+      # - /:/pools/root:ro
+      # - /mnt/data:/pools/data:ro
+    environment:
+      HUB_MODE: agent
+      PROC_PATH: /host/proc
+      SYS_PATH: /host/sys
+      # AGENT_TOKEN: "a-long-random-text"   # the hub must then send the same text (token: in the YAML)

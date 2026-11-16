@@ -16,6 +16,7 @@ Everything is configured in **one YAML file**, which you can also edit on the pa
 - **Online checks** over HTTP(S) or plain TCP, done by the server, so open tabs cost nothing
 - **Container health** through a read-only Docker socket proxy
 - **Cards from Docker labels**: label a container and its card appears by itself
+- **Stats from several machines**: the same image runs as a small agent on your other servers
 - **Home network detection**: at home the cards open the LAN address, away the public one
 - **Config editor on the page** (form or plain YAML) with validation; a broken config never takes the page down
 - **Icons by name**: `icon: jellyfin` is fetched once from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) and kept
@@ -125,6 +126,42 @@ Label cards join the group of the same name from the YAML (a card with the same 
 health of their container, and need the docker-proxy from `compose.yaml`. A label with a mistake is listed under
 `labelErrors` in `/api/containers`. Switch the feature off with `settings.dockerLabels: false`.
 
+## Stats from other machines
+
+The stats tiles at the top show the machine the hub runs on. To add another machine (a Raspberry Pi, a second
+server, a VPS), run the same image there in **agent mode**. An agent has no page and no config; it only answers the
+hub with that machine's numbers.
+
+**On the other machine:** save [compose.agent.yaml](compose.agent.yaml) as `compose.yaml` and run `docker compose up -d`
+(or without Docker: `HUB_MODE=agent PORT=8081 node src/server.js`).
+
+**On the hub**, in the YAML (or gear menu → Edit YAML → *Server stats* → *Other machines*):
+
+```yaml
+stats:
+  name: NAS                             # caption of the hub's own tiles
+  machines:
+    - name: Raspberry Pi
+      url: http://{pi}:8081             # the agent's address; {host} shortcuts work
+      token: a-long-random-text         # only if the agent has AGENT_TOKEN set
+      network: [eth0]                   # optional: cards for the network tile
+      disks:                            # optional: storage tiles, paths as the AGENT sees them
+        - { name: SD card, path: /pools/root, size: 29G }
+```
+
+Each machine gets its own row of tiles under its name. One that does not answer shows why (refused, timed out, wrong
+token) and never holds up the others. The hub asks every `statsIntervalSeconds`.
+
+| Agent variable | Meaning |
+|---|---|
+| `HUB_MODE=agent` | Start as an agent instead of as the hub |
+| `AGENT_TOKEN` | Optional shared secret. Without it, anyone who can reach the port can read the numbers |
+| `PORT`, `PROC_PATH`, `SYS_PATH` | As for the hub |
+
+Things to know: the agent only reports numbers and free space of the paths the hub asks for, nothing else. The token
+is stored in the hub's YAML, so everyone who may open the config editor can read it. Agent addresses and tokens are
+never sent to the page. Use the token, and HTTPS or a VPN, when the agent is reachable from outside your network.
+
 ## Home network: local addresses
 
 Give a service a `local:` address and its card opens that address when you are on the home network.
@@ -195,6 +232,7 @@ Environment variables:
 | `CONFIG_EDITOR` | on | `off` removes the editor |
 | `ICON_DOWNLOAD` | on | `off` never fetches icons |
 | `PUID`, `PGID` | `1000` | Docker only: the user the hub runs as |
+| `HUB_MODE`, `AGENT_TOKEN` | | Agent mode, see "Stats from other machines" |
 
 ## Open it like an app on Windows (taskbar)
 
@@ -225,10 +263,10 @@ hand: right-click the shortcut → **Pin to taskbar**.
 | Path | What |
 |---|---|
 | `config/services.yaml`, `config/starter.yaml` | Full example config; the small one a new install starts with |
-| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `icons.js`, `editor.js` (config editor API) |
+| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `icons.js`, `editor.js` (config editor API) |
 | `public/` | The page: `index.html`, `app.js`, `style.css`, `i18n.js` (translations), `theme.js`, the login page, the config editor, `icons/` |
 | `test/` | `node --test` suites, with fake servers and `/proc` fixtures |
-| `Dockerfile`, `docker-entrypoint.sh`, `compose.yaml` | Docker |
+| `Dockerfile`, `docker-entrypoint.sh`, `compose.yaml`, `compose.agent.yaml` | Docker: the hub, and the agent for other machines |
 | `compose.truenas.yaml`, `scripts/`, `DEPLOY.md` | Building on a TrueNAS box, helper scripts |
 
 ## Contributing, credits, license

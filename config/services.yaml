@@ -54,6 +54,15 @@ stats:
     - name: backup
       path: /pools/backup
       size: 1.8T
+  # Other machines whose numbers are shown too, each in its own row of tiles. On that machine the
+  # same image runs in agent mode (compose.agent.yaml; README: "Stats from other machines").
+  # machines:
+  #   - name: Raspberry Pi
+  #     url: http://{pi}:8081          # the agent's address
+  #     token: a-long-random-text      # only if the agent has AGENT_TOKEN set
+  #     network: [eth0]                # optional
+  #     disks:                         # optional; paths as the agent sees them
+  #       - { name: SD card, path: /pools/root, size: 29G }
 
 # ---------------------------------------------------------------------------------------------
 # One entry per web UI:
