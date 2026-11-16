@@ -41,3 +41,10 @@ jobs:
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file notes.md --verify-tag
           fi
+      # GitHub marks the release made last as "Latest"; that is wrong when an older version gets its
+      # release afterwards. The highest version number is the latest.
+      - name: Mark the highest version as latest
+        run: |
+          top="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | sort -V | tail -n 1)"
+          echo "latest: $top"
+          gh release edit "$top" --repo "$GITHUB_REPOSITORY" --latest
