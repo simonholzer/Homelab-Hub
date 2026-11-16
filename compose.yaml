@@ -8,7 +8,7 @@
 # ./data with a dataset path (e.g. /mnt/tank/appdata/homelab-hub). More in DEPLOY.md.
 services:
   homelab-hub:
-    image: ghcr.io/your-username/homelab-hub:latest
+    image: ghcr.io/simonholzer/homelab-hub:latest
     # build: .                  # instead of `image:` to build from a clone of the repository
     restart: unless-stopped
     depends_on:

@@ -13,7 +13,7 @@
     "local": "node scripts/run-local.mjs",
     "demo": "node scripts/demo.mjs",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
     "yaml": "^2.8.0"
