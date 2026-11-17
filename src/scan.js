@@ -13,6 +13,7 @@
 //       enabled: true                 # false = never search
 //       subnets: [192.168.1.0/24]     # instead of the networks found on this machine
 //       ports: [8081]                 # where agents answer (default 8081 and 8080)
+import dgram from 'node:dgram';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,23 +60,26 @@ function isPrivate(n) {
  */
 export function subnetsFromRouteTable(text) {
   const out = [];
+  let defaultIface = null; // the card the way to the internet goes through: its network is the "real" one
   for (const line of String(text).split('\n').slice(1)) {
     const f = line.trim().split(/\s+/);
     if (f.length < 8) continue;
     const [iface, destHex, gatewayHex, , , , , maskHex] = f;
-    if (SKIP_IFACE.test(iface) || gatewayHex !== '00000000') continue; // only networks the machine sits in
     // the kernel writes the numbers in little-endian hex
     const le = (hex) => Buffer.from(hex.padStart(8, '0'), 'hex').readUInt32LE(0);
     const dest = le(destHex);
     const mask = le(maskHex);
+    if (dest === 0 && mask === 0 && gatewayHex !== '00000000') defaultIface ??= iface;
+    if (SKIP_IFACE.test(iface) || gatewayHex !== '00000000') continue; // only networks the machine sits in
     if (dest === 0 || mask === 0 || !isPrivate(dest)) continue;
     out.push({ base: dest, prefix: maskToPrefix(mask), iface });
   }
+  for (const n of out) if (n.iface === defaultIface) n.primary = true;
   return out;
 }
 
 /** The same from this process's own network cards (the hub running without Docker, or with network_mode: host). */
-export function subnetsFromInterfaces(interfaces = os.networkInterfaces()) {
+export function subnetsFromInterfaces(interfaces = os.networkInterfaces(), primaryIp = null) {
   const out = [];
   for (const [iface, addrs] of Object.entries(interfaces)) {
     if (SKIP_IFACE.test(iface)) continue;
@@ -84,7 +88,7 @@ export function subnetsFromInterfaces(interfaces = os.networkInterfaces()) {
       const own = ipToInt(a.address);
       if (!isPrivate(own)) continue;
       const net = parseCidr(a.cidr ?? `${a.address}/${maskToPrefix(ipToInt(a.netmask))}`);
-      if (net) out.push({ ...net, iface, own });
+      if (net) out.push({ ...net, iface, own, ...(a.address === primaryIp ? { primary: true } : {}) });
     }
   }
   return out;
@@ -94,7 +98,10 @@ export function subnetsFromInterfaces(interfaces = os.networkInterfaces()) {
 function limit(nets, minPrefix) {
   const seen = new Set();
   const out = [];
-  for (const n of nets) {
+  // the network with the way to the internet first: an agent that answers on two networks (a virtual
+  // machine's adapter, say) is then kept with its address there
+  const ordered = [...nets.filter((n) => n.primary), ...nets.filter((n) => !n.primary)];
+  for (const n of ordered) {
     let net = { base: n.base, prefix: n.prefix };
     if (net.prefix < minPrefix) net = { base: ((n.own ?? n.base) & 0xffffff00) >>> 0, prefix: 24 };
     const key = formatCidr(net);
@@ -110,7 +117,7 @@ function limit(nets, minPrefix) {
  * The networks to search: the ones from the config, else the host's (routing table of PID 1 under
  * procPath, i.e. the host when /proc is mounted from it), else this process's own cards.
  */
-export function networksToSearch({ subnets = [], procPath = '/proc', readFile = (f) => fs.readFileSync(f, 'utf8'), interfaces } = {}) {
+export function networksToSearch({ subnets = [], procPath = '/proc', readFile = (f) => fs.readFileSync(f, 'utf8'), interfaces, primaryIp = null } = {}) {
   if (subnets.length > 0) return limit(subnets.map(parseCidr).filter(Boolean), MIN_PREFIX);
   for (const file of [path.join(procPath, '1', 'net', 'route'), path.join(procPath, 'net', 'route')]) {
     try {
@@ -121,7 +128,37 @@ export function networksToSearch({ subnets = [], procPath = '/proc', readFile = 
       // not Linux, or not mounted: next one
     }
   }
-  return limit(subnetsFromInterfaces(interfaces), AUTO_MIN_PREFIX);
+  return limit(subnetsFromInterfaces(interfaces, primaryIp), AUTO_MIN_PREFIX);
+}
+
+/**
+ * This machine's own address on the way to the internet (no packet is sent: a UDP "connect" only picks
+ * the route). null when there is none.
+ */
+export function primaryAddress() {
+  return new Promise((resolve) => {
+    const socket = dgram.createSocket('udp4');
+    const done = (ip) => {
+      try {
+        socket.close();
+      } catch {
+        // already closed
+      }
+      resolve(ip);
+    };
+    socket.on('error', () => done(null));
+    try {
+      socket.connect(53, '1.1.1.1', () => {
+        try {
+          done(socket.address().address);
+        } catch {
+          done(null);
+        }
+      });
+    } catch {
+      done(null);
+    }
+  });
 }
 
 /** Asks one address whether an agent answers there. Resolves to the agent's /healthz answer or null. */
@@ -154,16 +191,20 @@ async function pool(items, limitCount, fn) {
  */
 export async function findAgents({ networks, ports = DEFAULT_AGENT_PORTS, probe = probeAgent, concurrency = 64, timeoutMs = 800 }) {
   const targets = [];
-  for (const net of networks) for (const ip of hostsOf(net)) for (const port of ports) targets.push({ ip, port });
+  networks.forEach((net, rank) => {
+    for (const ip of hostsOf(net)) for (const port of ports) targets.push({ ip, port, rank });
+  });
   const found = [];
   const ipsWithAgent = new Set();
-  await pool(targets, concurrency, async ({ ip, port }) => {
+  await pool(targets, concurrency, async ({ ip, port, rank }) => {
     if (ipsWithAgent.has(ip)) return; // one agent per machine is enough
     const url = `http://${ip}:${port}`;
     const hello = await probe(url, timeoutMs);
     if (!hello || ipsWithAgent.has(ip)) return;
     ipsWithAgent.add(ip);
     found.push({
+      id: typeof hello.id === 'string' ? hello.id : '',
+      rank,
       url,
       ip,
       port,
@@ -173,7 +214,13 @@ export async function findAgents({ networks, ports = DEFAULT_AGENT_PORTS, probe 
       token: hello.token === true
     });
   });
-  return found.sort((a, b) => ipToInt(a.ip) - ipToInt(b.ip));
+  // the same agent on several addresses (one machine in two networks): once, from the first network
+  const byId = new Map();
+  for (const a of found.sort((x, y) => x.rank - y.rank || ipToInt(x.ip) - ipToInt(y.ip))) {
+    const key = a.id || a.ip;
+    if (!byId.has(key)) byId.set(key, a);
+  }
+  return [...byId.values()].map(({ id, rank, ...rest }) => rest).sort((a, b) => ipToInt(a.ip) - ipToInt(b.ip));
 }
 
 /**
@@ -189,7 +236,7 @@ export class AgentFinder {
     this.getSettings = getSettings;
     this.procPath = procPath;
     this.find = find;
-    this.networks = networks ?? ((subnets) => networksToSearch({ subnets, procPath }));
+    this.networks = networks ?? (async (subnets) => networksToSearch({ subnets, procPath, primaryIp: subnets.length ? null : await primaryAddress() }));
     this.intervalMs = intervalMs;
     this.agents = [];
     this.searched = []; // the networks of the last search, as text
@@ -210,7 +257,7 @@ export class AgentFinder {
     }
     this.running = (async () => {
       try {
-        const networks = this.networks(settings.subnets ?? []);
+        const networks = await this.networks(settings.subnets ?? []);
         this.searched = networks.map(formatCidr);
         if (networks.length === 0) {
           this.agents = [];

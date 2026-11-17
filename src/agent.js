@@ -86,6 +86,8 @@ function cachedContainers(list) {
 export function createAgentApp({ reader, token = '', containers = null, name = '', version = '' }) {
   const wanted = token ? digest(token) : null;
   const docker = containers ? cachedContainers(containers) : null;
+  // new at every start: tells the hub's search that two addresses lead to the same agent
+  const id = crypto.randomUUID();
   const send = (res, status, body) => {
     const data = Buffer.from(JSON.stringify(body));
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'content-length': data.length, 'x-content-type-options': 'nosniff' });
@@ -94,7 +96,7 @@ export function createAgentApp({ reader, token = '', containers = null, name = '
   return http.createServer(async (req, res) => {
     const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
     // open to anyone (no token): just enough for the hub's network search to recognise an agent
-    if (pathname === '/healthz') return send(res, 200, { ok: true, mode: 'agent', name, version, docker: docker != null, token: wanted != null });
+    if (pathname === '/healthz') return send(res, 200, { ok: true, mode: 'agent', id, name, version, docker: docker != null, token: wanted != null });
     if (pathname !== AGENT_PATH) return send(res, 404, { error: 'This is a Homelab Hub agent: it only answers the hub (see the README, "Stats from other machines").' });
     if (req.method !== 'GET' && req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
     if (wanted) {

@@ -44,7 +44,9 @@ test('agent: answers with this machine\'s numbers for the disks and cards the hu
     assert.equal((await fetch(url + '/')).status, 404);
     assert.equal((await fetch(url + '/api/status')).status, 404);
     assert.equal((await fetch(url + '/api/config')).status, 404);
-    assert.deepEqual(await (await fetch(url + '/healthz')).json(), { ok: true, mode: 'agent', name: '', version: '', docker: false, token: false });
+    const { id, ...hello } = await (await fetch(url + '/healthz')).json();
+    assert.match(id, /^[0-9a-f-]{36}$/);
+    assert.deepEqual(hello, { ok: true, mode: 'agent', name: '', version: '', docker: false, token: false });
   });
 });
 
