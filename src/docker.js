@@ -110,6 +110,6 @@ export function summarizeContainers(patterns, containers) {
     state: worst,
     total: counted.length,
     healthy: counted.filter((c) => c.health === 'healthy').length,
-    items: items.map((c) => ({ name: c.name, health: c.health }))
+    items: items.map((c) => ({ name: c.name, health: c.health, ...(c.machine ? { machine: c.machine } : {}) }))
   };
 }

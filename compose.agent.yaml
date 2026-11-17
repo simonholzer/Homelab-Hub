@@ -1,6 +1,6 @@
 # Homelab Hub AGENT: for ANOTHER machine (a Raspberry Pi, a second server, a VPS) whose CPU, memory,
-# load, network and storage the hub should show too. The agent has no page and no config; it only
-# answers the hub. The hub itself is installed with compose.yaml, not with this file.
+# load, network, storage and Docker containers the hub should show too. The agent has no page and no
+# config; it only answers the hub. The hub itself is installed with compose.yaml, not with this file.
 #
 # On the other machine:
 #   1. save this file as compose.yaml
@@ -8,7 +8,8 @@
 #   3. docker compose up -d
 #   4. check: http://<this machine>:8081/healthz  answers  {"ok":true,"mode":"agent"}
 #
-# On the hub: gear menu -> Edit services and settings -> Server stats -> Other machines -> Add machine
+# On the hub: gear menu -> Edit services and settings -> Server stats. On the same network the hub
+# finds the agent by itself ("Found on the network" -> Add). Otherwise: Other machines -> Add machine
 #   Name:     Raspberry Pi
 #   Address:  http://<this machine>:8081
 #   Token:    the same text as AGENT_TOKEN
@@ -23,8 +24,10 @@
 #           - { name: SD card, path: /pools/root, size: 29G }
 services:
   homelab-hub-agent:
-    image: ghcr.io/simonholzer/homelab-hub:latest   # the same image as the hub; or a fixed version, e.g. :1.3.0
+    image: ghcr.io/simonholzer/homelab-hub:latest   # the same image as the hub; or a fixed version, e.g. :1.4.0
     restart: unless-stopped
+    depends_on:
+      - docker-proxy
     ports:
       - "8081:8080"             # the hub asks http://<this machine>:8081
     volumes:
@@ -38,4 +41,17 @@ services:
       HUB_MODE: agent
       PROC_PATH: /host/proc
       SYS_PATH: /host/sys
+      # This machine's containers go to the hub too (health badges, cards from labels, "found" list).
+      # Remove this line (and the docker-proxy below) to report only the numbers.
+      DOCKER_HOST: http://docker-proxy:2375
+      # AGENT_NAME: "Raspberry Pi"          # the name the hub suggests when it finds this agent
       # AGENT_TOKEN: "a-long-random-text"   # the hub must then send the same text
+
+  # Read-only window onto Docker: only "list containers" is allowed (CONTAINERS=1).
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro

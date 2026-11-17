@@ -161,6 +161,27 @@ export function normalizeConfig(raw) {
   // Cards from Docker labels (homelab-hub.name, homelab-hub.url, ...): on unless switched off.
   if (s.dockerLabels != null && typeof s.dockerLabels !== 'boolean') errors.push('settings.dockerLabels: must be true or false');
   settings.dockerLabels = s.dockerLabels !== false;
+  // Search the home network for agents (see scan.js): on unless switched off.
+  const d = s.discovery ?? {};
+  const discovery = { enabled: true, subnets: [], ports: [] };
+  if (typeof d === 'boolean') discovery.enabled = d;
+  else if (typeof d !== 'object' || Array.isArray(d)) errors.push('settings.discovery: must be a mapping (enabled, subnets, ports) or true/false');
+  else {
+    if (d.enabled != null && typeof d.enabled !== 'boolean') errors.push('settings.discovery.enabled: must be true or false');
+    discovery.enabled = d.enabled !== false;
+    for (const [i, net] of asList(d.subnets).entries()) {
+      const m = /^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/.exec(net.trim());
+      if (!m || Number(m[2]) < 20 || Number(m[2]) > 32 || m[1].split('.').some((x) => Number(x) > 255)) {
+        errors.push(`settings.discovery.subnets[${i}]: "${net}" must be a network like 192.168.1.0/24 (from /20 to /32)`);
+      } else discovery.subnets.push(net.trim());
+    }
+    for (const [i, port] of asList(d.ports).entries()) {
+      const n = Number(port);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) errors.push(`settings.discovery.ports[${i}]: "${port}" is not a port number`);
+      else if (discovery.ports.length < 4) discovery.ports.push(n);
+    }
+  }
+  settings.discovery = discovery;
   // Language of the page for browsers that have not chosen one: auto (the browser's), en, de.
   const language = s.language == null ? 'auto' : String(s.language).toLowerCase();
   if (!LANGUAGES.includes(language)) errors.push(`settings.language: must be one of ${LANGUAGES.join(', ')}`);

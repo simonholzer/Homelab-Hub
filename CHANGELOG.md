@@ -2,6 +2,19 @@
 
 Every released version, newest first. The Docker image of a version is `ghcr.io/simonholzer/homelab-hub:<version>`.
 
+## 1.4.0
+
+- **Containers on other machines.** An agent with `DOCKER_HOST` (compose.agent.yaml now brings its own read-only
+  docker-proxy) sends its containers to the hub. Health badges, cards from Docker labels and the "found" list then
+  work for every machine, not only the one the hub runs on.
+- **Agents find themselves.** The hub searches its home network for agents and lists them in the editor under
+  *Server stats → Found on the network*, with an Add button. `settings.discovery` sets networks and ports;
+  `AGENT_DISCOVERY: "off"` switches the search off.
+- The agent's `/healthz` now also says its name (`AGENT_NAME`), version and whether it reports containers.
+
+Updating needs no changes. To get the containers of another machine, update its agent with the new
+compose.agent.yaml (it adds the docker-proxy).
+
 ## 1.3.0
 
 Everything in this version is about the first hour with the hub.

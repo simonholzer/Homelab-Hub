@@ -397,7 +397,7 @@ function healthBadge(svc) {
   if (!c) return h('span', { class: 'health', title: data.dockerError || t('No container data yet'), text: t('containers: ?') });
   const label = t(HEALTH_LABEL[c.state] ?? c.state);
   const text = c.state === 'missing' ? label : c.total > 1 ? `${label} (${c.total})` : label;
-  const title = c.items.map((i) => `${i.name}: ${t(HEALTH_LABEL[i.health] ?? i.health)}`).join('\n') || t('No matching container. See /api/containers.');
+  const title = c.items.map((i) => `${i.name}${i.machine ? ` (${i.machine})` : ''}: ${t(HEALTH_LABEL[i.health] ?? i.health)}`).join('\n') || t('No matching container. See /api/containers.');
   return h('span', { class: `health ${c.state}`, title, text: `● ${text}` });
 }
 
