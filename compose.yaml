@@ -36,6 +36,7 @@ services:
       # CONFIG_EDITOR: "off"            # no editor on the page
       # ICON_DOWNLOAD: "off"            # never fetch missing icons from dashboard-icons
       # UPDATE_CHECK: "off"             # never ask GitHub whether a newer version exists
+      # AGENT_DISCOVERY: "off"        # never search the home network for agents on other machines
 
   # Read-only window onto Docker: only "list containers" is allowed (CONTAINERS=1).
   # Everything else (start/stop/exec/create ...) is refused by the proxy, so the hub

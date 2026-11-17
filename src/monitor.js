@@ -5,7 +5,15 @@ import { parseConfigText, ensureConfigFile, servicesFromLabels, DEFAULT_SETTINGS
 import { runCheck } from './checks.js';
 import { listContainers, summarizeContainers, autoContainerPatterns } from './docker.js';
 import { StatsReader } from './stats.js';
-import { fetchMachineStats } from './agent.js';
+import { fetchAgent } from './agent.js';
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^\[|\]$/g, '');
+  } catch {
+    return '';
+  }
+}
 
 const EMPTY_CONFIG = {
   title: 'Homelab Hub',
@@ -27,6 +35,7 @@ export class Monitor {
    * @param {Function} [o.containers]     override for tests: () => Promise<container[]>
    * @param {object}   [o.statsReader]    override for tests: {read(disks)}
    * @param {Function} [o.fetchMachine]   override for tests: (machine, timeoutMs) => stats of another machine
+   * @param {Function} [o.fetchAgent]     override for tests: (machine, timeoutMs) => {stats, containers, dockerError}
    */
   constructor(o) {
     this.configPath = o.configPath;
@@ -35,8 +44,9 @@ export class Monitor {
     this.check = o.check ?? runCheck;
     this.listContainers = o.containers ?? (() => listContainers(this.dockerHost));
     this.statsReader = o.statsReader ?? new StatsReader({ procPath: o.procPath, sysPath: o.sysPath });
-    this.fetchMachine = o.fetchMachine ?? fetchMachineStats;
-    this.machineStats = []; // other machines: [{name, stats, error}]
+    this.fetchAgent = o.fetchAgent ?? (o.fetchMachine ? async (m, t) => ({ stats: await o.fetchMachine(m, t), containers: null }) : fetchAgent);
+    this.machineStats = []; // other machines: [{name, stats, error, containers?, dockerError?}]
+    this.remoteContainers = new Map(); // machine name -> {host, containers} (the last good answer of its Docker)
     this.config = EMPTY_CONFIG;
     this.configError = null;
     this.configLoadedAt = null;
@@ -128,7 +138,10 @@ export class Monitor {
     const statsPromise = this.statsTimer ? Promise.resolve() : this.refreshStats();
 
     // Docker first: its labels can add cards, which are then checked like the others.
-    const docker = await containersPromise;
+    // The containers of other machines (reported by their agents) count like this machine's own.
+    const own = await containersPromise;
+    const remote = this.otherContainers();
+    const docker = own.list || remote.length > 0 ? { list: [...(own.list ?? []), ...remote] } : own;
     if (docker.list && config.settings.dockerLabels !== false) {
       const made = servicesFromLabels(docker.list, config);
       this.labelGroups = made.groups;
@@ -150,7 +163,7 @@ export class Monitor {
 
     if (docker.list) {
       this.discovered = docker.list;
-      this.dockerError = null;
+      this.dockerError = own.list || !this.dockerHost ? null : own.error ?? null;
       for (const svc of services) {
         if (svc.containers.length > 0) {
           this.containerSummary.set(svc.id, summarizeContainers(svc.containers, docker.list));
@@ -189,13 +202,25 @@ export class Monitor {
         ),
         Promise.all(
           machines.map((m) =>
-            this.fetchMachine(m, timeoutMs).then(
-              (stats) => ({ name: m.name, stats, error: null }),
+            this.fetchAgent(m, timeoutMs).then(
+              (answer) => {
+                if (answer.containers) this.remoteContainers.set(m.name, { host: hostOf(m.url), containers: answer.containers, at: Date.now() });
+                return {
+                  name: m.name,
+                  stats: answer.stats,
+                  error: null,
+                  ...(answer.containers ? { containers: answer.containers.length } : {}),
+                  ...(answer.dockerError ? { dockerError: answer.dockerError } : {})
+                };
+              },
               (err) => ({ name: m.name, stats: null, error: err.message })
             )
           )
         )
       ]);
+      // machines that left the config take their containers with them
+      const names = new Set(machines.map((m) => m.name));
+      for (const name of [...this.remoteContainers.keys()]) if (!names.has(name)) this.remoteContainers.delete(name);
       this.machineStats = others;
       this.stats = own.stats ?? null;
       this.statsError = own.error ?? null;
@@ -266,6 +291,20 @@ export class Monitor {
       statsError: this.statsError,
       dockerError: this.dockerError
     };
+  }
+
+  /**
+   * The containers other machines' agents reported, each marked with its machine and that machine's
+   * address. An answer older than 5 minutes (agent gone) no longer counts: its cards show "not found".
+   */
+  otherContainers() {
+    const out = [];
+    const tooOld = Date.now() - 5 * 60 * 1000;
+    for (const [machine, r] of this.remoteContainers) {
+      if (r.at < tooOld) continue;
+      for (const c of r.containers) out.push({ ...c, machine, host: r.host });
+    }
+    return out;
   }
 
   /** Containers Docker reports, for fixing `containers:` patterns in the YAML. */

@@ -492,7 +492,8 @@ function secStats() {
     h('h4', { text: 'Other machines' }),
     h('p', { class: 'cfg-desc', text: 'Machines that run the hub in agent mode (HUB_MODE=agent). Each gets its own row of tiles below this one\'s.' }),
     ...machineBoxes,
-    h('div', { class: 'cfg-add' }, addMachine)
+    h('div', { class: 'cfg-add' }, addMachine),
+    agentList()
   );
 }
 let focusNew = null; // the storage tile that was just added (see diskEditor)
@@ -838,6 +839,74 @@ function grip(kind, list, i) {
   return b;
 }
 
+// ---- agents found on the home network (see scan.js) ----
+let agents = null; // null = not asked yet; the answer of /api/config/agents
+let agentsTimer = null;
+
+async function loadAgents() {
+  clearTimeout(agentsTimer);
+  try {
+    const { status, data } = await api('GET', '/api/config/agents');
+    agents = status === 200 ? data : { enabled: true, agents: [], error: data.error ?? '' };
+  } catch (err) {
+    agents = { enabled: true, agents: [], error: err.message };
+  }
+  if (agents.scanning && dlg?.open) agentsTimer = setTimeout(loadAgents, 1500); // ask again until the search is done
+  document.getElementById('cfg-agents')?.replaceWith(agentList());
+}
+
+async function searchAgents() {
+  agents = { ...(agents ?? { agents: [] }), scanning: true };
+  document.getElementById('cfg-agents')?.replaceWith(agentList());
+  try {
+    await api('POST', '/api/config/agents/scan', {});
+  } catch {
+    // shown by loadAgents
+  }
+  setTimeout(loadAgents, 800);
+}
+
+/** The agents found on the network that are not a machine here yet, each with an Add button. */
+function agentList() {
+  const box = h('div', { class: 'cfg-agents', id: 'cfg-agents' });
+  const inConfig = new Set((Array.isArray(st.model.stats?.machines) ? st.model.stats.machines : []).filter(isObject).map((m) => String(m.url ?? '').replace(/\/+$/, '')));
+  const fresh = (agents?.agents ?? []).filter((a) => !a.added && !inConfig.has(a.url));
+  const again = textBtn(null, agents?.scanning ? 'Searching…' : 'Search again', searchAgents);
+  if (agents?.scanning) again.disabled = true;
+  const head = h('div', { class: 'cfg-found-head' }, h('span', { class: 'cfg-l', text: 'Found on the network' }), again);
+  let note;
+  if (!agents) note = 'Looking…';
+  else if (agents.enabled === false) note = 'Searching for agents is switched off.';
+  else if (agents.error) note = agents.error;
+  else if (agents.scanning && fresh.length === 0) note = 'Searching the home network for agents…';
+  else if (fresh.length === 0) note = agents.scannedAt ? 'No new agents found. An agent answers on port 8081 (compose.agent.yaml).' : 'Not searched yet.';
+  const rows = fresh.map((a) =>
+    h(
+      'div',
+      { class: 'cfg-found-row' },
+      h('span', { class: 'cfg-svctext' }, h('span', { class: 'cfg-svcname', rawText: a.name || a.ip }), h('span', { class: 'cfg-svcsub', rawText: `${a.url}${a.docker ? ` · ${t('with containers')}` : ''}${a.token ? ` · ${t('needs its token')}` : ''}` })),
+      textBtn('plus', 'Add', () => {
+        const stats = isObject(st.model.stats) ? st.model.stats : (st.model.stats = {});
+        if (!Array.isArray(stats.machines)) stats.machines = [];
+        const mc = { name: a.name || a.ip, url: hostShortcut(a.ip) === a.ip ? a.url : `http://${hostShortcut(a.ip)}:${a.port}` };
+        if (a.token) mc.token = '';
+        stats.machines.push(mc);
+        a.added = true;
+        touched();
+        renderForm();
+        if (a.token) {
+          // the token has to be typed in: put the cursor there
+          const boxes = ui.main.querySelectorAll('#cfg-stats .cfg-machine');
+          boxes[boxes.length - 1]?.querySelectorAll('input')[2]?.focus();
+        }
+      })
+    )
+  );
+  box.append(head, ...(note ? [h('p', { class: 'cfg-desc', text: note })] : []), ...rows);
+  if (agents?.networks?.length) box.append(h('p', { class: 'cfg-h', rawText: `${t('Searched')}: ${agents.networks.join(', ')}` }));
+  return box;
+}
+
 // ---- found on this server: containers with a published port and no card yet ----
 let found = null; // null = not asked yet; {list, error}
 let foundGroup = ''; // name of the group new cards go into ('' = the first group)
@@ -850,6 +919,13 @@ async function loadFound() {
     found = { list: [], error: err.message };
   }
   if (st?.tab === 'visual') document.getElementById('cfg-found')?.replaceWith(secFound());
+}
+
+/** An address as the cards should write it: {name} when a host shortcut has exactly this address. */
+function hostShortcut(address) {
+  const hosts = isObject(st.model.hosts) ? st.model.hosts : {};
+  const match = Object.keys(hosts).find((k) => String(hosts[k]) === address);
+  return match ? `{${match}}` : address;
 }
 
 /** The address of this server as the cards should write it: a host shortcut when one fits. */
@@ -866,6 +942,8 @@ function serverHost() {
 function secFound() {
   const groups = (Array.isArray(st.model.groups) ? st.model.groups : []).filter(isObject);
   const host = serverHost();
+  // a container on another machine: that machine's address (as a {host} shortcut when one fits)
+  const hostFor = (s) => (s.machine ? hostShortcut(s.host) : host);
   const body = [];
   if (!found) body.push(h('p', { class: 'cfg-desc', text: 'Looking…' }));
   else if (found.error) body.push(h('p', { class: 'cfg-desc', text: 'Docker is not reachable, so nothing can be found here. It needs the docker-proxy from the example compose file.' }));
@@ -884,7 +962,7 @@ function secFound() {
         foundGroup = g.name;
       }
       if (!Array.isArray(g.services)) g.services = [];
-      const svc = { name: s.name, icon: s.icon, local: `${s.scheme}://${host}:${s.port}` };
+      const svc = { name: s.name, icon: s.icon, local: `${s.scheme}://${hostFor(s)}:${s.port}` };
       if (s.scheme === 'https') svc.insecure = true; // a port like 9443 usually has a self-signed certificate
       g.services.push(svc);
       found.list = found.list.filter((x) => x !== s);
@@ -896,7 +974,7 @@ function secFound() {
         'div',
         { class: 'cfg-found-row' },
         h('img', { src: iconUrl(s.icon), alt: '', width: 26, height: 26 }),
-        h('span', { class: 'cfg-svctext' }, h('span', { class: 'cfg-svcname', rawText: s.name }), h('span', { class: 'cfg-svcsub', rawText: `${s.scheme}://${host}:${s.port}${s.ports.length > 1 ? `   (${t('also')} ${s.ports.filter((p) => p !== s.port).join(', ')})` : ''}` })),
+        h('span', { class: 'cfg-svctext' }, h('span', { class: 'cfg-svcname', rawText: s.name }), h('span', { class: 'cfg-svcsub', rawText: `${s.machine ? `${s.machine} · ` : ''}${s.scheme}://${hostFor(s)}:${s.port}${s.ports.length > 1 ? `   (${t('also')} ${s.ports.filter((p) => p !== s.port).join(', ')})` : ''}` })),
         textBtn('plus', 'Add', () => add(s))
       )
     );
@@ -909,7 +987,7 @@ function secFound() {
   return section(
     'cfg-found',
     'Found on this server',
-    'Containers that publish a port and have no card yet. "Add" makes a normal card with the home address filled in; add the public address afterwards if there is one. Databases and other helpers are left out.',
+    'Containers that publish a port and have no card yet, on this server and on the other machines whose agent reports its containers. "Add" makes a normal card with the home address filled in; add the public address afterwards if there is one. Databases and other helpers are left out.',
     ...body
   );
 }
@@ -1190,9 +1268,11 @@ async function load(target) {
     if (status !== 200) throw new Error(tr(data.error) ?? t('The hub answered with an error ({status}).', { status }));
     adopt(data);
     found = null;
+    agents = null;
     render();
     showTarget(target);
     loadFound();
+    loadAgents();
   } catch (err) {
     ui.main.replaceChildren(h('p', { class: 'cfg-msg bad', text: err.message }));
   }

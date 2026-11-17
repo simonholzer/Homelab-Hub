@@ -182,12 +182,14 @@ health of their container, and need the docker-proxy from `compose.yaml`. A labe
 
 The stats tiles at the top show the machine the hub runs on. To add another machine (a Raspberry Pi, a second
 server, a VPS), run the same image there in **agent mode**. An agent has no page and no config; it only answers the
-hub with that machine's numbers.
+hub with that machine's numbers, and with its Docker containers.
 
 **On the other machine:** save [compose.agent.yaml](compose.agent.yaml) as `compose.yaml` and run `docker compose up -d`
 (or without Docker: `HUB_MODE=agent PORT=8081 node src/server.js`).
 
-**On the hub:** gear menu → Edit services and settings → *Server stats* → *Other machines* → **Add machine**, or in the YAML:
+**On the hub:** gear menu → Edit services and settings → *Server stats*. Agents on the same network show up there by
+themselves under **Found on the network**: click **Add** (and type the token, if the agent has one). Otherwise
+*Other machines* → **Add machine**, or in the YAML:
 
 ```yaml
 stats:
@@ -208,9 +210,38 @@ token) and never holds up the others. The hub asks every `statsIntervalSeconds`.
 |---|---|
 | `HUB_MODE=agent` | Start as an agent instead of as the hub |
 | `AGENT_TOKEN` | Optional shared secret. Without it, anyone who can reach the port can read the numbers |
+| `DOCKER_HOST` | That machine's Docker (a read-only socket proxy, as in compose.agent.yaml): its containers are reported too |
+| `AGENT_NAME` | The name the hub suggests when it finds this agent (default: the container's host name) |
 | `PORT`, `PROC_PATH`, `SYS_PATH` | As for the hub |
 
-Things to know: the agent only reports numbers and free space of the paths the hub asks for, nothing else. The token
+### Containers on other machines
+
+An agent with `DOCKER_HOST` sends its containers along with its numbers. The hub treats them like its own:
+`containers:` patterns and *Container health badges* match them (the badge's tooltip names the machine), cards from
+[Docker labels](#cards-from-docker-labels) on that machine appear, and *Found on this server* also lists that
+machine's containers, with its address filled in. When an agent stops answering, its containers count for five more
+minutes, then the cards say "no container found".
+
+### Finding agents on the network
+
+The hub searches its home network for agents at start and every 10 minutes (or with *Search again* in the editor):
+it asks every address of the networks the server sits in on ports 8081 and 8080 for `/healthz`, and keeps the ones
+that answer as an agent. The networks come from the server's routing table (the `/proc` mount); Docker's own
+networks, VPNs and networks larger than /22 are left out. Nothing is added by itself.
+
+```yaml
+settings:
+  discovery:
+    enabled: true                 # false = never search
+    subnets: [192.168.1.0/24]     # instead of the networks found on the server
+    ports: [8081]                 # where your agents answer
+```
+
+`AGENT_DISCOVERY: "off"` in the hub's compose file switches the search off completely. An agent's `/healthz` answers
+without a token (name, version, whether it has Docker and a token): that is what the search looks for.
+
+Things to know: the agent only reports numbers, free space of the paths the hub asks for, and (with `DOCKER_HOST`)
+the list of its containers: names, images, state and published ports, never their environment or files. The token
 is stored in the hub's YAML, so everyone who may open the config editor can read it. Agent addresses and tokens are
 never sent to the page. Use the token, and HTTPS or a VPN, when the agent is reachable from outside your network.
 

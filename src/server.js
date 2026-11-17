@@ -4,6 +4,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,8 @@ import { createIconFetcher } from './icons.js';
 import { createAgentApp, AGENT_PATH } from './agent.js';
 import { StatsReader } from './stats.js';
 import { suggestServices } from './discover.js';
+import { listContainers } from './docker.js';
+import { AgentFinder } from './scan.js';
 import { importServices } from './import.js';
 import { createUpdateChecker, DEFAULT_REPO } from './update.js';
 
@@ -141,8 +144,9 @@ export const forgetIcons = () => iconCache.clear();
  * @param {object|null} [o.auth]  from createAuth(): the password login (null = none)
  * @param {boolean} [o.autoIcons]  true = icons that are named but missing are fetched from dashboard-icons
  * @param {object|null} [o.update]  from createUpdateChecker(): tells the page about a newer version
+ * @param {object|null} [o.finder]  from new AgentFinder(): agents found on the home network
  */
-export function createApp({ monitor, network, publicDir = path.join(root, 'public'), editor = true, iconsDir, downloadIcon, auth = null, autoIcons = false, update = null }) {
+export function createApp({ monitor, network, publicDir = path.join(root, 'public'), editor = true, iconsDir, downloadIcon, auth = null, autoIcons = false, update = null, finder = null }) {
   const userIcons = iconsDir ?? (monitor.configPath ? path.join(path.dirname(monitor.configPath), 'icons') : null);
   const icons = () => iconVersions(publicDir, userIcons);
   const fetchIcons = autoIcons && userIcons ? createIconFetcher({ iconsDir: userIcons, download: downloadIcon, onIcon: forgetIcons }) : null;
@@ -265,6 +269,19 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
       if (pathname === '/api/config/suggestions' && (req.method === 'GET' || req.method === 'HEAD')) {
         return json(res, 200, { suggestions: suggestServices(monitor.discovered ?? [], monitor.config), dockerError: monitor.dockerError ?? null });
       }
+      // agents found on the home network, for the editor's "Found on the network" list
+      if (pathname === '/api/config/agents' && (req.method === 'GET' || req.method === 'HEAD')) {
+        if (!finder) return json(res, 200, { enabled: false, agents: [] });
+        const known = new Set((monitor.config.stats?.machines ?? []).map((m) => agentKey(m.url)));
+        const state = finder.state();
+        return json(res, 200, { ...state, agents: state.agents.map((a) => ({ ...a, added: known.has(agentKey(a.url)) })) });
+      }
+      if (pathname === '/api/config/agents/scan' && req.method === 'POST') {
+        if (!fromOwnPage(req)) return json(res, 403, { error: 'Changes are only accepted from the hub page itself.' });
+        if (!finder) return json(res, 404, { error: 'Searching for agents is switched off (AGENT_DISCOVERY=off).' });
+        finder.scan().catch(() => {});
+        return json(res, 202, { ok: true });
+      }
       // another dashboard's config file -> groups of cards (nothing is saved here)
       if (pathname === '/api/config/import' && req.method === 'POST') {
         if (!fromOwnPage(req)) return json(res, 403, { error: 'Changes are only accepted from the hub page itself.' });
@@ -325,16 +342,29 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
   });
 }
 
+/** "http://192.168.1.20:8081/" and "http://192.168.1.20:8081" are the same agent. */
+function agentKey(url) {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.toLowerCase()}:${u.port || (u.protocol === 'https:' ? 443 : 80)}`;
+  } catch {
+    return String(url);
+  }
+}
+
 /** HUB_MODE=agent: no page, only this machine's numbers for a hub somewhere else (see agent.js). */
 function agentMain() {
   const token = process.env.AGENT_TOKEN ?? '';
   const reader = new StatsReader({ procPath: process.env.PROC_PATH ?? '/proc', sysPath: process.env.SYS_PATH ?? '/sys' });
-  const server = createAgentApp({ reader, token });
+  const dockerHost = process.env.DOCKER_HOST ?? '';
+  const name = (process.env.AGENT_NAME ?? '').trim() || os.hostname();
+  const server = createAgentApp({ reader, token, name, version: VERSION, containers: dockerHost ? () => listContainers(dockerHost) : null });
   const port = Number(process.env.PORT ?? 8080);
   const host = process.env.HOST ?? '0.0.0.0';
   server.listen(port, host, () => {
     console.log(`[agent] answering the hub on http://${host.includes(':') ? `[${host}]` : host}:${port}${AGENT_PATH}`);
     if (!token) console.log('[agent] no token set (AGENT_TOKEN): anyone who can reach this port can read the numbers');
+    console.log(dockerHost ? `[agent] reporting the containers of ${dockerHost} as "${name}"` : '[agent] no DOCKER_HOST: only numbers, no containers');
   });
   const shutdown = () => {
     server.close(() => process.exit(0));
@@ -373,13 +403,18 @@ function main() {
   const update = off(process.env.UPDATE_CHECK) ? null : createUpdateChecker({ current: VERSION, repo: process.env.UPDATE_REPO || DEFAULT_REPO });
   update?.start();
   console.log(`[hub] version ${VERSION}`);
-  const server = createApp({ monitor, network, editor, auth, autoIcons: !off(process.env.ICON_DOWNLOAD), update });
+  const finder = off(process.env.AGENT_DISCOVERY)
+    ? null
+    : new AgentFinder({ getSettings: () => monitor.config.settings.discovery ?? { enabled: true, subnets: [], ports: [] }, procPath: process.env.PROC_PATH ?? '/proc' });
+  finder?.start();
+  const server = createApp({ monitor, network, editor, auth, autoIcons: !off(process.env.ICON_DOWNLOAD), update, finder });
   // HOST=:: also answers on IPv6 (the laptop preview sets it: "localhost" is tried on IPv6 first on Windows)
   const host = process.env.HOST ?? '0.0.0.0';
   server.listen(port, host, () => console.log(`[hub] listening on http://${host.includes(':') ? `[${host}]` : host}:${port}`));
   const shutdown = () => {
     monitor.stop();
     network.stop();
+    finder?.stop();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 2000).unref();
   };
