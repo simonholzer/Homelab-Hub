@@ -45,7 +45,7 @@
 .cfg-tabs button:hover { color: var(--text); }
 
 /* ---- body ---- */
-.cfg-body { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 0; }
+.cfg-body { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 0; }
 .cfg-body[data-tab="yaml"] { grid-template-columns: minmax(0, 1fr); }
 .cfg-body[data-tab="yaml"] .cfg-nav { display: none; }
 .cfg-nav {
@@ -73,6 +73,25 @@
 }
 .cfg-nav button.sub { color: var(--muted); }
 .cfg-nav button:hover { background: var(--panel-hover); color: var(--text); }
+/* the page tabs: a column on the left, a scrolling row on a phone */
+.cfg-tablist { display: flex; flex-direction: column; gap: 2px; }
+.cfg-nav .cfg-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-weight: 550;
+  position: relative;
+}
+.cfg-nav .cfg-tab .cfg-ic { flex: none; }
+.cfg-tab-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.cfg-nav .cfg-tab[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); }
+.cfg-nav .cfg-tab[aria-selected="true"]::before { content: ""; position: absolute; left: -10px; top: 7px; bottom: 7px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.cfg-badge { flex: none; min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--border); color: var(--muted); font-size: 0.7rem; font-weight: 650; line-height: 18px; text-align: center; }
+.cfg-badge.new { background: var(--accent); color: var(--on-accent); }
+.cfg-jumps { display: flex; flex-direction: column; gap: 1px; margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); }
+.cfg-jumps button { padding-left: 20px; font-size: 0.84rem; }
 .cfg-navtitle { margin: 14px 10px 4px; color: var(--muted); font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; }
 .cfg-main { padding: 20px 22px 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 .cfg-msg { color: var(--muted); padding: 30px 0; text-align: center; }
@@ -94,6 +113,18 @@
 .cfg-desc { color: var(--muted); font-size: 0.84rem; max-width: 70ch; }
 .cfg-sec > h3 + .cfg-desc { margin-top: -8px; }
 .cfg-divider { margin: 14px 2px 0; }
+
+/* the head of a page, and the parts that only some pages have */
+.cfg-pagehead { display: flex; flex-direction: column; gap: 4px; margin: 0 2px 2px; }
+.cfg-pagehead h3 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+.cfg-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; position: sticky; top: -20px; z-index: 2; margin: 0 -22px; padding: 10px 22px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); border-bottom: 1px solid var(--border); }
+.cfg-search { flex: 1; min-width: 180px; max-width: 360px; }
+.cfg-empty { color: var(--muted); font-size: 0.86rem; font-style: italic; padding: 4px 2px; }
+.cfg-callout { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border)); border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, var(--panel)); font-size: 0.9rem; }
+
+/* a labelled part of a form: which fields belong together */
+.cfg-fs { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px 14px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--panel) 55%, var(--bg)); }
+.cfg-fs-t { margin-bottom: -2px; color: var(--accent); font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; }
 
 .cfg-grid { display: grid; gap: 12px 14px; align-items: start; }
 .cfg-grid.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -190,7 +221,9 @@ select.cfg-in { cursor: pointer; }
 .cfg-used { color: var(--muted); font-size: 0.76rem; white-space: nowrap; }
 
 /* ---- groups and services ---- */
+.cfg-group { border-left: 3px solid color-mix(in srgb, var(--accent) 70%, var(--border)); }
 .cfg-grouphead { display: flex; align-items: center; gap: 12px; }
+.cfg-groupopts { padding: 8px 12px; border-radius: 8px; background: var(--bg); }
 .cfg-grouphead .cfg-in { flex: 1; }
 .cfg-svcs { display: flex; flex-direction: column; gap: 6px; }
 .cfg-svc { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
@@ -231,7 +264,7 @@ body.cfg-dragging, body.cfg-dragging * { cursor: grabbing !important; user-selec
 .cfg-svcsub { color: var(--muted); font: 0.76rem ui-monospace, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cfg-tags { display: flex; gap: 6px; flex: none; }
 .cfg-tag { padding: 1px 8px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--muted); font-size: 0.7rem; font-weight: 600; white-space: nowrap; }
-.cfg-svcform { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 16px; border-top: 1px solid var(--border); }
+.cfg-svcform { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 14px; border-top: 1px solid var(--border); }
 
 .cfg-iconrow { display: flex; gap: 8px; }
 .cfg-iconbtn, .cfg-iconopt {
@@ -298,9 +331,16 @@ body.cfg-dragging, body.cfg-dragging * { cursor: grabbing !important; user-selec
 
 @media (max-width: 760px) {
   .cfg { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
-  .cfg-body { grid-template-columns: minmax(0, 1fr); }
-  .cfg-nav { display: none; }
+  .cfg-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .cfg-nav { padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; }
+  .cfg-tablist { flex-direction: row; gap: 4px; }
+  .cfg-nav .cfg-tab { flex: none; padding: 7px 10px; }
+  .cfg-nav .cfg-tab[aria-selected="true"]::before { left: 8px; right: 8px; top: auto; bottom: -6px; width: auto; height: 3px; border-radius: 3px 3px 0 0; }
+  .cfg-jumps { display: none; }
   .cfg-main { padding: 14px 12px 22px; }
+  .cfg-toolbar { top: -14px; margin: 0 -12px; padding: 8px 12px; }
+  .cfg-search { max-width: none; }
+  .cfg-fs { padding: 10px; }
   .cfg-sec { padding: 14px 12px 16px; }
   .cfg-head { padding: 10px 8px 10px 14px; gap: 10px; }
   .cfg-file { display: none; }

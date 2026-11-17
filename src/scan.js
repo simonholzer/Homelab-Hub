@@ -18,7 +18,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const DEFAULT_AGENT_PORTS = [8081, 8080];
-const SKIP_IFACE = /^(lo|docker|br-|veth|virbr|cni|flannel|cali|vxlan|tun|tap|wg|tailscale|zt|kube|podman|lxc|lxd|incus)/i;
+// Docker's, VPNs' and virtual machines' own networks: no agent to find there (and the same machine twice)
+const SKIP_IFACE = /^(lo|docker|br-|veth|virbr|vboxnet|vmnet|cni|flannel|cali|vxlan|tun|tap|wg|tailscale|zt|kube|podman|lxc|lxd|incus)|virtualbox|vmware|vethernet|hyper-v|bluetooth/i;
 const MIN_PREFIX = 20; // at most 4096 addresses per network
 const AUTO_MIN_PREFIX = 22; // networks found by themselves: at most 1024 addresses, larger ones shrink to the /24 around this machine
 

@@ -14,8 +14,29 @@ const ICONS = {
   x: 'M6 6l12 12M18 6L6 18',
   copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
-  grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01'
+  grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
+  cards: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4',
+  server: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01',
+  link: 'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',
+  gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1',
+  box: 'M4 7l8-4 8 4v10l-8 4-8-4zM4 7l8 4 8-4M12 11v10',
+  fold: 'M7 10l5-5 5 5M7 14l5 5 5-5'
 };
+
+/**
+ * The pages of the form, in the order of the tab bar. Every part of the config lives on exactly one page;
+ * `sections` are the ids of the boxes on it (to open the editor at one of them).
+ */
+const PAGES = [
+  { id: 'services', icon: 'cards', label: 'Services', desc: 'The cards on the page, in their groups. Click a service to edit it; drag the handle to move it, also into another group.', sections: [] },
+  { id: 'found', icon: 'search', label: 'Found', desc: 'Containers that run in Docker and have no card yet: one click makes a card.', sections: ['cfg-found'] },
+  { id: 'machines', icon: 'server', label: 'Machines', desc: 'The stats tiles at the top of the page: this server, and other machines that run the agent.', sections: ['cfg-own', 'cfg-stats', 'cfg-agents-sec'] },
+  { id: 'hosts', icon: 'link', label: 'Host shortcuts', desc: 'Short names for addresses, used as {name} in service addresses.', sections: ['cfg-hosts'] },
+  { id: 'settings', icon: 'gear', label: 'Settings', desc: 'How the page looks and how often the hub checks things.', sections: ['cfg-general', 'cfg-timing', 'cfg-home', 'cfg-proxy', 'cfg-docker'] },
+  { id: 'backup', icon: 'box', label: 'Import and backup', desc: '', sections: ['cfg-tools'] }
+];
+const pageOf = (sectionId) => (/^cfg-group-/.test(sectionId ?? '') ? 'services' : PAGES.find((p) => p.sections.includes(sectionId))?.id ?? null);
 const NO_CHECK = ['none', 'off', 'no', 'false'];
 
 const isObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -106,6 +127,8 @@ function adopt(d) {
     writable: st?.writable ?? true,
     icons: st?.icons ?? {},
     tab: st?.tab ?? 'visual',
+    page: st?.page ?? 'services',
+    filter: st?.filter ?? '',
     ...Object.fromEntries(Object.entries(d).filter(([k]) => ['file', 'writable', 'icons'].includes(k))),
     version: d.version,
     base: d.text,
@@ -231,6 +254,9 @@ function section(id, title, desc, ...children) {
   return h('section', { class: 'cfg-sec', id }, h('h3', { text: title }), desc ? h('p', { class: 'cfg-desc', text: desc }) : null, ...children);
 }
 
+/** A labelled part inside a form (e.g. "Addresses" in a service), so it is clear which fields belong together. */
+const fieldset = (title, ...children) => h('div', { class: 'cfg-fs' }, h('div', { class: 'cfg-fs-t', text: title }), ...children);
+
 /** Swaps two neighbours; `redraw` draws the part of the form that shows them (default: all of it). */
 function move(arr, i, d, redraw = renderForm) {
   const j = i + d;
@@ -241,7 +267,8 @@ function move(arr, i, d, redraw = renderForm) {
 }
 
 // ---- sections ----
-function secGeneral() {
+/** The Settings page: one box per topic. */
+function secSettings() {
   const m = st.model;
   const s = () => child(m, 'settings');
   const num = (key, placeholder, min, max) =>
@@ -252,66 +279,104 @@ function secGeneral() {
     put(s(), 'language', language.value === 'auto' ? undefined : language.value);
     touched();
   });
-  return section(
-    'cfg-general',
-    'General',
-    null,
-    grid(2, field('Title', input(() => m.title, (v) => put(m, 'title', v), { placeholder: 'Homelab Hub' })), field('Subtitle', input(() => m.subtitle, (v) => put(m, 'subtitle', v)))),
-    h('h4', { text: 'Timing' }),
-    grid(
-      3,
-      field('Check services every', num('checkIntervalSeconds', '30', 5, 3600), '5 to 3600'),
-      field('Measure server stats every', num('statsIntervalSeconds', '5', 1, 3600), '1 to 3600'),
-      field('A check may take', num('timeoutSeconds', '4', 1, 30), '1 to 30, then it counts as offline')
+  // settings.discovery may be written as true/false or as a mapping; the form always writes the mapping
+  const disc = () => {
+    const set = s();
+    if (!isObject(set.discovery)) set.discovery = set.discovery === false ? { enabled: false } : {};
+    return set.discovery;
+  };
+  const discRaw = m.settings?.discovery;
+  const discOn = discRaw !== false && !(isObject(discRaw) && discRaw.enabled === false);
+  const tidyDisc = () => {
+    const d = m.settings?.discovery;
+    if (isObject(d) && Object.keys(d).filter((k) => k !== ID).length === 0) delete m.settings.discovery;
+  };
+  return [
+    section(
+      'cfg-general',
+      'Page',
+      'What the page is called and which language it speaks.',
+      grid(2, field('Title', input(() => m.title, (v) => put(m, 'title', v), { placeholder: 'Homelab Hub' })), field('Subtitle', input(() => m.subtitle, (v) => put(m, 'subtitle', v)), 'A short line under the title. Optional.')),
+      grid(2, h('div', { class: 'cfg-f' }, h('span', { class: 'cfg-l', text: 'Language' }), language, h('span', { class: 'cfg-h', text: 'For browsers that have not chosen one in the gear menu.' })))
     ),
-    h('h4', { text: 'Home network' }),
-    field(
-      'Extra public IP addresses that count as home',
-      listInput(() => m.settings?.home?.publicIps, (arr) => (child(s(), 'home').publicIps = arr), { placeholder: 'none' }),
-      'Usually empty. Separate several with commas.'
-    ),
-    check(
-      'This hub runs on the home network',
-      m.settings?.home?.runsAtHome !== false,
-      (on) => {
-        const home = child(s(), 'home');
-        if (on) delete home.runsAtHome;
-        else home.runsAtHome = false;
-      },
-      'Switch off for a preview on a computer somewhere else.'
-    ),
-    h('h4', { text: 'Behind a reverse proxy or login page' }),
-    grid(
-      2,
-      field(
-        'Header with the visitor address',
-        input(() => m.settings?.home?.clientIpHeader, (v) => put(child(s(), 'home'), 'clientIpHeader', v.trim()), { mono: true, placeholder: 'x-forwarded-for' }),
-        'Only for a reverse proxy other than Cloudflare, e.g. x-forwarded-for. Used to tell home from away.'
-      ),
-      field(
-        'Host names of your login pages',
-        listInput(() => m.settings?.loginHosts, (arr) => put(s(), 'loginHosts', arr.length ? arr : undefined), { placeholder: 'auth.example.com' }),
-        'E.g. auth.example.com. A check that is redirected there shows "unknown" instead of green.'
+    section(
+      'cfg-timing',
+      'Timing',
+      'How often the hub looks at your services and machines.',
+      grid(
+        3,
+        field('Check services every', num('checkIntervalSeconds', '30', 5, 3600), '5 to 3600'),
+        field('Measure server stats every', num('statsIntervalSeconds', '5', 1, 3600), '1 to 3600'),
+        field('A check may take', num('timeoutSeconds', '4', 1, 30), '1 to 30, then it counts as offline')
       )
     ),
-    h('h4', { text: 'Page' }),
-    grid(
-      2,
-      h(
-        'div',
-        { class: 'cfg-f' },
-        h('span', { class: 'cfg-l', text: 'Language' }),
-        language,
-        h('span', { class: 'cfg-h', text: 'For browsers that have not chosen one in the gear menu.' })
+    section(
+      'cfg-home',
+      'Home network',
+      'On the home network the cards open their home address; away, their public one.',
+      check(
+        'This hub runs on the home network',
+        m.settings?.home?.runsAtHome !== false,
+        (on) => {
+          const home = child(s(), 'home');
+          if (on) delete home.runsAtHome;
+          else home.runsAtHome = false;
+        },
+        'Switch off for a preview on a computer somewhere else.'
       ),
-      h(
-        'div',
-        { class: 'cfg-f' },
-        h('span', { class: 'cfg-l', text: 'Docker' }),
-        check('Cards from Docker labels', m.settings?.dockerLabels !== false, (on) => put(s(), 'dockerLabels', on ? undefined : false), 'Containers with homelab-hub.* labels get a card by themselves.')
+      field(
+        'Extra public IP addresses that count as home',
+        listInput(() => m.settings?.home?.publicIps, (arr) => (child(s(), 'home').publicIps = arr), { placeholder: 'none' }),
+        'Usually empty. Separate several with commas.'
+      )
+    ),
+    section(
+      'cfg-proxy',
+      'Behind a reverse proxy or login page',
+      null,
+      grid(
+        2,
+        field(
+          'Header with the visitor address',
+          input(() => m.settings?.home?.clientIpHeader, (v) => put(child(s(), 'home'), 'clientIpHeader', v.trim()), { mono: true, placeholder: 'x-forwarded-for' }),
+          'Only for a reverse proxy other than Cloudflare, e.g. x-forwarded-for. Used to tell home from away.'
+        ),
+        field(
+          'Host names of your login pages',
+          listInput(() => m.settings?.loginHosts, (arr) => put(s(), 'loginHosts', arr.length ? arr : undefined), { placeholder: 'auth.example.com' }),
+          'E.g. auth.example.com. A check that is redirected there shows "unknown" instead of green.'
+        )
+      )
+    ),
+    section(
+      'cfg-docker',
+      'Docker and other machines',
+      null,
+      check('Cards from Docker labels', m.settings?.dockerLabels !== false, (on) => put(s(), 'dockerLabels', on ? undefined : false), 'Containers with homelab-hub.* labels get a card by themselves.'),
+      check(
+        'Search the home network for agents',
+        discOn,
+        (on) => {
+          put(disc(), 'enabled', on ? undefined : false);
+          tidyDisc();
+        },
+        'Agents on other machines then show up under Machines, ready to add.'
+      ),
+      grid(
+        2,
+        field(
+          'Networks to search',
+          listInput(() => (isObject(discRaw) ? discRaw.subnets : null), (arr) => (put(disc(), 'subnets', arr.length ? arr : undefined), tidyDisc()), { placeholder: 'the networks of this server' }),
+          'Only if the right one is not found by itself, e.g. 192.168.1.0/24'
+        ),
+        field(
+          'Agent ports',
+          listInput(() => (isObject(discRaw) ? discRaw.ports : null), (arr) => (put(disc(), 'ports', arr.length ? arr.map((x) => (/^\d+$/.test(x) ? Number(x) : x)) : undefined), tidyDisc()), { placeholder: '8081, 8080' }),
+          'Where your agents answer.'
+        )
       )
     )
-  );
+  ];
 }
 
 function renameHost(old, el) {
@@ -454,20 +519,21 @@ function secStats() {
           }, { danger: true })
         )
       ),
-      grid(
-        2,
-        field('Name', input(() => mc.name, (v) => put(mc, 'name', v), { placeholder: 'Raspberry Pi', after: showTitle })),
-        field('Address of the agent', input(() => mc.url, (v) => put(mc, 'url', v.trim()), { mono: true, placeholder: 'http://{pi}:8081' }), 'Where the hub in agent mode answers on that machine. {host} shortcuts work.')
+      fieldset(
+        'Connection',
+        grid(
+          2,
+          field('Name', input(() => mc.name, (v) => put(mc, 'name', v), { placeholder: 'Raspberry Pi', after: showTitle })),
+          field('Address of the agent', input(() => mc.url, (v) => put(mc, 'url', v.trim()), { mono: true, placeholder: 'http://{pi}:8081' }), 'Where the hub in agent mode answers on that machine. {host} shortcuts work.')
+        ),
+        grid(
+          2,
+          field('Token', input(() => mc.token, (v) => put(mc, 'token', v.trim()), { mono: true, placeholder: 'none' }), 'Only if the agent has AGENT_TOKEN set: the same text.'),
+          field('Network cards', listInput(() => mc.network, (arr) => put(mc, 'network', arr.length ? arr : undefined), { placeholder: 'all physical cards' }), 'For the network speed tile, e.g. eth0')
+        ),
+        check('Hide this machine', mc.hidden === true, (on) => put(mc, 'hidden', on || undefined))
       ),
-      grid(
-        2,
-        field('Token', input(() => mc.token, (v) => put(mc, 'token', v.trim()), { mono: true, placeholder: 'none' }), 'Only if the agent has AGENT_TOKEN set: the same text.'),
-        field('Network cards', listInput(() => mc.network, (arr) => put(mc, 'network', arr.length ? arr : undefined), { placeholder: 'all physical cards' }), 'For the network speed tile, e.g. eth0')
-      ),
-      check('Hide this machine', mc.hidden === true, (on) => put(mc, 'hidden', on || undefined)),
-      h('h5', { text: 'Storage tiles' }),
-      h('p', { class: 'cfg-desc', text: 'Paths as the agent sees them (the right-hand side of its volume mounts).' }),
-      diskEditor(mc, '/pools/root')
+      fieldset('Storage tiles', h('p', { class: 'cfg-h', text: 'Paths as the agent sees them (the right-hand side of its volume mounts).' }), diskEditor(mc, '/pools/root'))
     );
   });
   const addMachine = textBtn('plus', 'Add machine', () => {
@@ -478,23 +544,28 @@ function secStats() {
     const boxes = ui.main.querySelectorAll('#cfg-stats .cfg-machine');
     boxes[boxes.length - 1]?.querySelector('input')?.focus();
   });
-  return section(
-    'cfg-stats',
-    'Server stats',
-    'The tiles at the top of the page. One storage tile per path; the free space is read live, the total size is a number you set.',
-    grid(
-      2,
-      field('Caption', input(() => m.stats?.name, (v) => put(stats(), 'name', v), { placeholder: 'NAS' })),
-      field('Network cards', listInput(() => m.stats?.network, (arr) => put(stats(), 'network', arr.length ? arr : undefined), { placeholder: 'all physical cards' }), 'For the network speed tile, e.g. eno1')
+  return [
+    section(
+      'cfg-own',
+      'This server',
+      'The machine the hub runs on. One storage tile per path; the free space is read live, the total size is a number you set.',
+      grid(
+        2,
+        field('Caption', input(() => m.stats?.name, (v) => put(stats(), 'name', v), { placeholder: 'NAS' })),
+        field('Network cards', listInput(() => m.stats?.network, (arr) => put(stats(), 'network', arr.length ? arr : undefined), { placeholder: 'all physical cards' }), 'For the network speed tile, e.g. eno1')
+      ),
+      h('h4', { text: 'Storage tiles' }),
+      diskEditor(stats(), '/pools/tank')
     ),
-    h('h4', { text: 'Storage tiles' }),
-    diskEditor(stats(), '/pools/tank'),
-    h('h4', { text: 'Other machines' }),
-    h('p', { class: 'cfg-desc', text: 'Machines that run the hub in agent mode (HUB_MODE=agent). Each gets its own row of tiles below this one\'s.' }),
-    ...machineBoxes,
-    h('div', { class: 'cfg-add' }, addMachine),
-    agentList()
-  );
+    section(
+      'cfg-stats',
+      'Other machines',
+      "Machines that run the hub in agent mode (HUB_MODE=agent). Each gets its own row of tiles, and its Docker containers count like this server's.",
+      ...(machineBoxes.filter(Boolean).length ? machineBoxes : [h('p', { class: 'cfg-empty', text: 'No other machines yet.' })]),
+      h('div', { class: 'cfg-add' }, addMachine)
+    ),
+    section('cfg-agents-sec', 'Found on the network', 'Agents the hub found on its home network that are not a machine here yet.', agentList())
+  ];
 }
 let focusNew = null; // the storage tile that was just added (see diskEditor)
 
@@ -600,30 +671,36 @@ function svcForm(svc, refreshHead) {
     el.dataset.addr = '';
     return el;
   };
-  const form = h(
-    'div',
-    { class: 'cfg-svcform' },
-    grid(2, field('Name', input(() => svc.name, (v) => put(svc, 'name', v), { after: refreshHead })), iconPicker(svc, refreshHead)),
-    field('Description', input(() => svc.description, (v) => put(svc, 'description', v)), 'A short line under the name. Optional.'),
+  const addresses = fieldset(
+    'Addresses',
     grid(
       2,
       field('Public address', addr('url', 'https://app.example.net'), 'Opened when you are away. Empty = home network only.'),
       field('Home address', addr('local', 'http://{nas}:8080'), 'Opened instead when you are on the home network. Optional.')
-    ),
-    grid(
-      2,
-      checkField(svc),
-      field(
-        'Docker containers',
-        listInput(() => svc.containers, (arr) => put(svc, 'containers', arr.length ? arr : undefined), { placeholder: '*immich*' }),
-        'Show the health of these containers on the card. * matches anything; separate several with commas.'
-      )
-    ),
-    h(
-      'div',
-      { class: 'cfg-checks' },
-      check('Accept a self-signed certificate on the check', svc.insecure === true, (on) => put(svc, 'insecure', on || undefined)),
+    )
+  );
+  const form = h(
+    'div',
+    { class: 'cfg-svcform' },
+    fieldset(
+      'Card',
+      grid(2, field('Name', input(() => svc.name, (v) => put(svc, 'name', v), { after: refreshHead })), iconPicker(svc, refreshHead)),
+      field('Description', input(() => svc.description, (v) => put(svc, 'description', v)), 'A short line under the name. Optional.'),
       check('Hide this card', svc.hidden === true, (on) => (put(svc, 'hidden', on || undefined), refreshHead()))
+    ),
+    addresses,
+    fieldset(
+      'Status',
+      grid(
+        2,
+        checkField(svc),
+        field(
+          'Docker containers',
+          listInput(() => svc.containers, (arr) => put(svc, 'containers', arr.length ? arr : undefined), { placeholder: '*immich*' }),
+          'Show the health of these containers on the card, on this server or another machine. * matches anything; separate several with commas.'
+        )
+      ),
+      check('Accept a self-signed certificate on the check', svc.insecure === true, (on) => put(svc, 'insecure', on || undefined))
     )
   );
   // host shortcuts: a click writes {name} into the address field used last
@@ -645,7 +722,7 @@ function svcForm(svc, refreshHead) {
       });
       return b;
     });
-    form.append(h('div', { class: 'cfg-chips' }, h('span', { class: 'cfg-h', text: 'Insert a host:' }), ...chips));
+    addresses.append(h('div', { class: 'cfg-chips' }, h('span', { class: 'cfg-h', text: 'Insert a host:' }), ...chips));
   }
   return form;
 }
@@ -707,9 +784,18 @@ function svcItem(svc, i, list, redraw) {
   return el;
 }
 
+/** Does a service match the search box of the Services page? */
+function matchesFilter(svc) {
+  const q = st.filter.trim().toLowerCase();
+  if (!q) return true;
+  return [svc.name, svc.url, svc.local, svc.description, svc.icon].some((v) => typeof v === 'string' && v.toLowerCase().includes(q));
+}
+
 function secGroup(g, gi, groups) {
   if (!isObject(g)) return null;
   const list = Array.isArray(g.services) ? g.services : [];
+  const filtering = st.filter.trim() !== '';
+  const groupHit = filtering && typeof g.name === 'string' && g.name.toLowerCase().includes(st.filter.trim().toLowerCase());
   // changes inside a group draw only this group again
   const redraw = () => document.getElementById(`cfg-group-${gi}`)?.replaceWith(secGroup(g, gi, groups));
   const count = h('span', { class: 'cfg-used', text: list.length === 1 ? t('1 service') : t('{n} services', { n: list.length }) });
@@ -742,7 +828,13 @@ function secGroup(g, gi, groups) {
     const forms = ui.main.querySelectorAll(`#cfg-group-${gi} .cfg-svcform`);
     forms[forms.length - 1]?.querySelector('input')?.focus();
   });
-  const svcs = h('div', { class: 'cfg-svcs' }, ...list.map((svc, i) => svcItem(svc, i, list, redraw)));
+  const items = list.map((svc, i) => {
+    const el = svcItem(svc, i, list, redraw);
+    if (el && filtering && !groupHit && !matchesFilter(svc)) el.hidden = true;
+    return el;
+  });
+  const svcs = h('div', { class: 'cfg-svcs' }, ...items);
+  if (list.length === 0) svcs.append(h('p', { class: 'cfg-empty', text: 'No services in this group yet.' }));
   // a service dropped on the group (not on another service) goes to its end; an empty group gets its list then
   const ownList = () => (Array.isArray(g.services) ? g.services : (g.services = []));
   svcs.dropInfo = { kind: 'svc', list: ownList, i: list.length };
@@ -750,10 +842,11 @@ function secGroup(g, gi, groups) {
     'section',
     { class: 'cfg-sec cfg-group', id: `cfg-group-${gi}` },
     head,
-    check('Container health badges for every card', g.autoContainers === true, (on) => put(g, 'autoContainers', on || undefined), 'Matches Docker containers by the card name; cards without a container get no badge.'),
+    h('div', { class: 'cfg-groupopts' }, check('Container health badges for every card', g.autoContainers === true, (on) => put(g, 'autoContainers', on || undefined), 'Matches Docker containers by the card name; cards without a container get no badge.')),
     svcs,
     h('div', { class: 'cfg-add' }, add)
   );
+  if (filtering && !groupHit && !list.some((x) => isObject(x) && matchesFilter(x))) sec.hidden = true;
   sec.dropInfo = { kind: 'group', list: () => groups, i: gi };
   return sec;
 }
@@ -845,14 +938,17 @@ let agentsTimer = null;
 
 async function loadAgents() {
   clearTimeout(agentsTimer);
+  if (!st) return;
   try {
     const { status, data } = await api('GET', '/api/config/agents');
     agents = status === 200 ? data : { enabled: true, agents: [], error: data.error ?? '' };
   } catch (err) {
     agents = { enabled: true, agents: [], error: err.message };
   }
+  if (!st) return;
   if (agents.scanning && dlg?.open) agentsTimer = setTimeout(loadAgents, 1500); // ask again until the search is done
   document.getElementById('cfg-agents')?.replaceWith(agentList());
+  if (st.tab === 'visual') renderNav();
 }
 
 async function searchAgents() {
@@ -873,7 +969,7 @@ function agentList() {
   const fresh = (agents?.agents ?? []).filter((a) => !a.added && !inConfig.has(a.url));
   const again = textBtn(null, agents?.scanning ? 'Searching…' : 'Search again', searchAgents);
   if (agents?.scanning) again.disabled = true;
-  const head = h('div', { class: 'cfg-found-head' }, h('span', { class: 'cfg-l', text: 'Found on the network' }), again);
+  const head = h('div', { class: 'cfg-found-head' }, again);
   let note;
   if (!agents) note = 'Looking…';
   else if (agents.enabled === false) note = 'Searching for agents is switched off.';
@@ -918,7 +1014,10 @@ async function loadFound() {
   } catch (err) {
     found = { list: [], error: err.message };
   }
-  if (st?.tab === 'visual') document.getElementById('cfg-found')?.replaceWith(secFound());
+  if (st?.tab === 'visual') {
+    document.getElementById('cfg-found')?.replaceWith(secFound());
+    renderNav();
+  }
 }
 
 /** An address as the cards should write it: {name} when a host shortcut has exactly this address. */
@@ -986,7 +1085,7 @@ function secFound() {
   }
   return section(
     'cfg-found',
-    'Found on this server',
+    'Containers without a card',
     'Containers that publish a port and have no card yet, on this server and on the other machines whose agent reports its containers. "Add" makes a normal card with the home address filled in; add the public address afterwards if there is one. Databases and other helpers are left out.',
     ...body
   );
@@ -1050,47 +1149,125 @@ function secTools() {
   );
 }
 
-function renderNav() {
-  const jump = (label, id, cls = '') => {
-    const b = h('button', { type: 'button', class: cls, [cls === 'sub' ? 'rawText' : 'text']: label });
-    b.addEventListener('click', () => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-    return b;
-  };
-  const groups = Array.isArray(st.model?.groups) ? st.model.groups : [];
-  ui.nav.replaceChildren(
-    jump('General', 'cfg-general'),
-    jump('Hosts', 'cfg-hosts'),
-    jump('Server stats', 'cfg-stats'),
-    jump('Found on this server', 'cfg-found'),
-    h('div', { class: 'cfg-navtitle', text: 'Groups' }),
-    ...groups.map((g, gi) => (isObject(g) ? jump(g.name || t('Unnamed group'), `cfg-group-${gi}`, 'sub') : null)),
-    jump('Import and backup', 'cfg-tools')
-  );
+/** How many new things wait on a page (shown as a badge on its tab). */
+function newCount(page) {
+  if (page === 'found') return found?.list?.length ?? 0;
+  if (page === 'machines') {
+    const inConfig = new Set((Array.isArray(st.model?.stats?.machines) ? st.model.stats.machines : []).filter(isObject).map((m) => String(m.url ?? '').replace(/\/+$/, '')));
+    return (agents?.agents ?? []).filter((a) => !a.added && !inConfig.has(a.url)).length;
+  }
+  return 0;
 }
 
-function renderForm() {
+/** A small grey number beside a tab: how much is on that page. */
+function itemCount(page) {
+  const m = st.model ?? {};
+  if (page === 'services') return (Array.isArray(m.groups) ? m.groups : []).filter(isObject).reduce((n, g) => n + (Array.isArray(g.services) ? g.services.length : 0), 0);
+  if (page === 'machines') return 1 + (Array.isArray(m.stats?.machines) ? m.stats.machines.length : 0);
+  if (page === 'hosts') return isObject(m.hosts) ? Object.keys(m.hosts).length : 0;
+  return null;
+}
+
+function goPage(page, sectionId) {
+  if (st.page !== page) {
+    st.page = page;
+    renderForm();
+    ui.main.scrollTop = 0;
+  }
+  if (sectionId) document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderNav() {
+  if (!st?.model) return ui.nav.replaceChildren();
+  const tabs = PAGES.map((p) => {
+    const fresh = newCount(p.id);
+    const count = itemCount(p.id);
+    const b = h(
+      'button',
+      { type: 'button', class: 'cfg-tab', role: 'tab', 'aria-selected': st.page === p.id ? 'true' : 'false' },
+      svg(p.icon, 17),
+      h('span', { class: 'cfg-tab-l', text: p.label }),
+      fresh > 0 ? h('span', { class: 'cfg-badge new', rawText: String(fresh), title: 'New' }) : count != null ? h('span', { class: 'cfg-badge', rawText: String(count) }) : null
+    );
+    b.addEventListener('click', () => goPage(p.id));
+    return b;
+  });
+  const out = [h('div', { class: 'cfg-tablist', role: 'tablist', 'aria-label': 'Sections' }, ...tabs)];
+  // on the Services page: a jump list of its groups
+  if (st.page === 'services') {
+    const groups = Array.isArray(st.model.groups) ? st.model.groups : [];
+    const jumps = groups.map((g, gi) => {
+      if (!isObject(g)) return null;
+      const b = h('button', { type: 'button', class: 'sub', rawText: g.name || t('Unnamed group') });
+      b.addEventListener('click', () => goPage('services', `cfg-group-${gi}`));
+      return b;
+    });
+    if (jumps.some(Boolean)) out.push(h('div', { class: 'cfg-jumps' }, h('div', { class: 'cfg-navtitle', text: 'Groups' }), ...jumps));
+  }
+  ui.nav.replaceChildren(...out);
+}
+
+/** The top of the Services page: search, fold all, add a group. */
+function servicesBar() {
   const m = st.model;
-  const scroll = ui.main.scrollTop;
-  const groups = Array.isArray(m.groups) ? m.groups : [];
+  const search = h('input', { type: 'search', class: 'cfg-in cfg-search', placeholder: 'Find a service…', 'aria-label': 'Find a service', spellcheck: 'false', autocomplete: 'off' });
+  search.value = st.filter;
+  search.addEventListener('input', () => {
+    st.filter = search.value;
+    const groups = Array.isArray(m.groups) ? m.groups : [];
+    groups.forEach((g, gi) => document.getElementById(`cfg-group-${gi}`)?.replaceWith(secGroup(g, gi, groups) ?? h('span')));
+  });
+  const all = () => (Array.isArray(m.groups) ? m.groups : []).flatMap((g) => (isObject(g) && Array.isArray(g.services) ? g.services.filter(isObject) : []));
+  const anyOpen = all().some((x) => st.open.has(x));
+  const fold = textBtn('fold', anyOpen ? 'Close all' : 'Open all', () => {
+    if (anyOpen) st.open = new WeakSet();
+    else all().forEach((x) => st.open.add(x));
+    renderForm();
+  });
   const addGroup = textBtn('plus', 'Add group', () => {
     if (!Array.isArray(m.groups)) m.groups = [];
     m.groups.push({ name: '', services: [] });
+    st.filter = '';
     touched();
     renderForm();
     const el = document.getElementById(`cfg-group-${m.groups.length - 1}`);
     el?.scrollIntoView({ block: 'center' });
     el?.querySelector('input')?.focus();
-  }, 'wide');
-  ui.main.replaceChildren(
-    secGeneral(),
-    secHosts(),
-    secStats(),
-    secFound(),
-    h('div', { class: 'cfg-divider' }, h('h3', { text: 'Groups and services' }), h('p', { class: 'cfg-desc', text: 'One card per web UI. Click a service to edit it.' })),
-    ...groups.map((g, gi) => secGroup(g, gi, groups)),
-    addGroup,
-    secTools()
-  );
+  });
+  return h('div', { class: 'cfg-toolbar' }, search, fold, addGroup);
+}
+
+function renderForm() {
+  const m = st.model;
+  const scroll = ui.main.scrollTop;
+  const page = PAGES.find((p) => p.id === st.page) ?? PAGES[0];
+  st.page = page.id;
+  const head = h('header', { class: 'cfg-pagehead' }, h('h3', { text: page.label }), page.desc ? h('p', { class: 'cfg-desc', text: page.desc }) : null);
+  let body;
+  if (page.id === 'services') {
+    const groups = Array.isArray(m.groups) ? m.groups : [];
+    const addGroup = textBtn('plus', 'Add group', () => {
+      if (!Array.isArray(m.groups)) m.groups = [];
+      m.groups.push({ name: '', services: [] });
+      st.filter = '';
+      touched();
+      renderForm();
+      const el = document.getElementById(`cfg-group-${m.groups.length - 1}`);
+      el?.scrollIntoView({ block: 'center' });
+      el?.querySelector('input')?.focus();
+    }, 'wide');
+    const sections = groups.map((g, gi) => secGroup(g, gi, groups));
+    const nothing = st.filter.trim() && sections.every((x) => !x || x.hidden) ? h('p', { class: 'cfg-empty', text: 'No service matches.' }) : null;
+    body = [servicesBar(), nothing, ...sections, groups.length === 0 ? h('p', { class: 'cfg-empty', text: 'No groups yet. A group is a heading on the page with its cards below it.' }) : null, addGroup];
+  } else if (page.id === 'found') {
+    const waiting = newCount('machines');
+    const hint = waiting > 0 ? h('div', { class: 'cfg-callout' }, h('span', { text: waiting === 1 ? 'An agent was found on the network.' : 'Agents were found on the network.' }), textBtn('server', 'Show', () => goPage('machines', 'cfg-agents-sec'))) : null;
+    body = [hint, secFound()];
+  } else if (page.id === 'machines') body = secStats();
+  else if (page.id === 'hosts') body = [secHosts()];
+  else if (page.id === 'settings') body = secSettings();
+  else body = [secTools()];
+  ui.main.replaceChildren(head, ...[body].flat().filter(Boolean));
   ui.main.scrollTop = scroll;
   renderNav();
 }
@@ -1237,6 +1414,12 @@ function build() {
 /** Scrolls to a section, a group or one service (which is unfolded). */
 function showTarget(target) {
   if (!target || !st?.model || st.tab !== 'visual') return;
+  const page = target.group != null ? 'services' : pageOf(target.section);
+  if (page && page !== st.page) {
+    st.page = page;
+    st.filter = '';
+    renderForm();
+  }
   let el = target.section ? document.getElementById(target.section) : null;
   const groups = Array.isArray(st.model.groups) ? st.model.groups : [];
   const gi = target.group == null ? -1 : groups.findIndex((g) => isObject(g) && g.name === target.group);
@@ -1267,6 +1450,7 @@ async function load(target) {
     const { status, data } = await api('GET', '/api/config');
     if (status !== 200) throw new Error(tr(data.error) ?? t('The hub answered with an error ({status}).', { status }));
     adopt(data);
+    st.filter = '';
     found = null;
     agents = null;
     render();
