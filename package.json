@@ -11,6 +11,7 @@
   "scripts": {
     "start": "node src/server.js",
     "local": "node scripts/run-local.mjs",
+    "local-agent": "node scripts/run-local-agent.mjs",
     "demo": "node scripts/demo.mjs",
     "dev": "node --watch src/server.js",
     "test": "node --test \"test/*.test.js\""

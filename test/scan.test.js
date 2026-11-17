@@ -65,6 +65,21 @@ test('scan: finds agents (one per machine) and nothing else', async () => {
   assert.equal(asked.length, 3); // 10.0.0.5:8080 is skipped once the machine has an agent
 });
 
+test('scan: one agent on two networks is listed once, with its address in the network to the internet', async () => {
+  const ifaces = {
+    'Ethernet 4': [{ address: '192.168.56.1', netmask: '255.255.255.0', family: 'IPv4', internal: false, cidr: '192.168.56.1/24' }],
+    WLAN: [{ address: '192.168.2.133', netmask: '255.255.255.0', family: 'IPv4', internal: false, cidr: '192.168.2.133/24' }]
+  };
+  const networks = networksToSearch({ readFile: () => { throw new Error('no'); }, interfaces: ifaces, primaryIp: '192.168.2.133' });
+  assert.deepEqual(networks.map(formatCidr), ['192.168.2.0/24', '192.168.56.0/24']);
+  const probe = async (url) => (url === 'http://192.168.56.1:8081' || url === 'http://192.168.2.133:8081' ? { ok: true, mode: 'agent', id: 'same', name: 'PC' } : null);
+  const found = await findAgents({ networks, probe });
+  assert.deepEqual(found.map((a) => a.url), ['http://192.168.2.133:8081']);
+  // the routing table says which card has the way out
+  const route = ROUTE.replace('eno1\t00000000', 'eno2\t00000000');
+  assert.equal(subnetsFromRouteTable(route).find((n) => n.primary).iface, 'eno2');
+});
+
 test('scan: a real agent answers the search', async () => {
   const agent = createAgentApp({ reader: { read: async () => ({}) }, name: 'Box', version: '1.4.0' });
   await new Promise((r) => agent.listen(0, '127.0.0.1', r));
@@ -126,7 +141,8 @@ test('agent: reports its containers, asks Docker at most every few seconds, says
     return [{ name: 'pihole', project: 'pihole', service: 'pihole', image: 'pihole/pihole', state: 'running', status: 'Up', health: 'healthy', ports: [80, 53] }];
   };
   await withAgent({ containers, name: 'Raspberry Pi', version: '9.9.9', token: 'secret-1' }, async (url) => {
-    const hello = await (await fetch(url + '/healthz')).json();
+    const { id, ...hello } = await (await fetch(url + '/healthz')).json();
+    assert.equal(typeof id, 'string');
     assert.deepEqual(hello, { ok: true, mode: 'agent', name: 'Raspberry Pi', version: '9.9.9', docker: true, token: true });
     const a = await fetchAgent({ url, token: 'secret-1' });
     const b = await fetchAgent({ url, token: 'secret-1' });
