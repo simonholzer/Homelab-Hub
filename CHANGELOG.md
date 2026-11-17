@@ -8,7 +8,7 @@ Every released version, newest first. The Docker image of a version is `ghcr.io/
   docker-proxy) sends its containers to the hub. Health badges, cards from Docker labels and the "found" list then
   work for every machine, not only the one the hub runs on.
 - **Agents find themselves.** The hub searches its home network for agents and lists them in the editor under
-  *Server stats → Found on the network*, with an Add button. `settings.discovery` sets networks and ports;
+  *Machines → Found on the network*, with an Add button. `settings.discovery` sets networks and ports;
   `AGENT_DISCOVERY: "off"` switches the search off.
 - **Editor in pages.** Instead of one long scroll, the editor has tabs: Services, Found, Machines, Host shortcuts,
   Settings, Import and backup. Each setting sits in a box with its topic, a service's fields are grouped into Card,

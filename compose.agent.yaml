@@ -8,7 +8,7 @@
 #   3. docker compose up -d
 #   4. check: http://<this machine>:8081/healthz  answers  {"ok":true,"mode":"agent"}
 #
-# On the hub: gear menu -> Edit services and settings -> Server stats. On the same network the hub
+# On the hub: gear menu -> Edit services and settings -> Machines. On the same network the hub
 # finds the agent by itself ("Found on the network" -> Add). Otherwise: Other machines -> Add machine
 #   Name:     Raspberry Pi
 #   Address:  http://<this machine>:8081

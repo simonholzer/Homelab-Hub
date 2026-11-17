@@ -41,7 +41,7 @@ on the server, and set a password. Everything is edited on the page; the gear me
 settings** opens the editor at any time, and the pencil on a card or group opens it right there.
 The config is kept in a Docker volume, so it survives updates.
 
-- **Storage tiles:** add one mount line per disk or pool in `compose.yaml` and one tile in the editor (*Server stats*).
+- **Storage tiles:** add one mount line per disk or pool in `compose.yaml` and one tile in the editor (*Machines*).
   A tile whose path isn't mounted says so, with the line to add.
 - **Other machines:** [compose.agent.yaml](compose.agent.yaml) on each, see "Stats from other machines".
 - **TrueNAS:** paste the same file under *Apps → Discover Apps → ⋮ → Install via YAML*; details in [DEPLOY.md](DEPLOY.md).
@@ -187,7 +187,7 @@ hub with that machine's numbers, and with its Docker containers.
 **On the other machine:** save [compose.agent.yaml](compose.agent.yaml) as `compose.yaml` and run `docker compose up -d`
 (or without Docker: `HUB_MODE=agent PORT=8081 node src/server.js`).
 
-**On the hub:** gear menu → Edit services and settings → *Server stats*. Agents on the same network show up there by
+**On the hub:** gear menu → Edit services and settings → *Machines*. Agents on the same network show up there by
 themselves under **Found on the network**: click **Add** (and type the token, if the agent has one). Otherwise
 *Other machines* → **Add machine**, or in the YAML:
 
