@@ -14,21 +14,18 @@ Everything is configured in **one YAML file**, which you can also edit on the pa
 </details>
 
 - **Online checks** over HTTP(S) or plain TCP, done by the server, so open tabs cost nothing
-- **Container health** through a read-only Docker socket proxy
-- **Cards from Docker labels**: label a container and its card appears by itself
+- **Container health** through a read-only Docker socket proxy, and **cards from Docker labels**
 - **Stats from several machines**: the same image runs as a small agent on your other servers
 - **Home network detection**: at home the cards open the LAN address, away the public one
-- **Everything is edited on the page**: a form with drag and drop (or the plain YAML), with validation; a broken config never takes the page down
-- **Finds your services**: lists what runs in Docker on the server, one click makes a card
-- **Import** from Homepage, Dashy and Homarr
-- **Icons by name**: `icon: jellyfin` is fetched once from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) and kept
-- **Optional password login**, set on the page, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
-- **Plain links** next to the checked services: bookmarks with an optional description line
-- **Works on a phone** and can be installed as an app (home screen, own window)
-- Dark, light, Catppuccin, Nord, Gruvbox and high-contrast themes, plus themes of your own; English and German
+- **Everything is edited on the page**: a form with drag and drop, or the YAML with color coding; a broken config never takes the page down
+- **Finds your services** in Docker, and **imports** from Homepage, Dashy and Homarr
+- **Icons by name** from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
+- **Themes**: dark, light, Catppuccin, Nord, Gruvbox, high contrast, and your own, made and shared in the editor
+- **Optional password login**, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
+- **Works on a phone** and can be installed as an app; English and German
 - Node.js, one dependency (`yaml`), no build step, no database; images for amd64 and arm64 (Raspberry Pi)
 
-## Quick start (Docker)
+## Quick start
 
 Save [compose.yaml](compose.yaml) on your server, then:
 
@@ -37,77 +34,21 @@ docker compose up -d
 ```
 
 Open `http://<server>:8080`. A new hub shows three steps: add your services, let it look for what already runs in Docker
-on the server, and set a password. Everything is edited on the page; the gear menu (top right) → **Edit services and
-settings** opens the editor at any time, and the pencil on a card or group opens it right there.
-The config is kept in a Docker volume, so it survives updates.
+on the server, and set a password. After that, the gear menu (top right) → **Edit services and settings** opens the
+editor, and the pencil on a card or group opens it right there. The config is kept in a Docker volume, so it survives
+updates.
 
-- **Storage tiles:** add one mount line per disk or pool in `compose.yaml` and one tile in the editor (*Machines*).
-  A tile whose path isn't mounted says so, with the line to add.
-- **Other machines:** [compose.agent.yaml](compose.agent.yaml) on each, see "Stats from other machines".
 - **TrueNAS:** paste the same file under *Apps → Discover Apps → ⋮ → Install via YAML*; details in [DEPLOY.md](DEPLOY.md).
 - **Just looking?** `npm install && npm run demo` shows the page with made-up data on `http://localhost:8099`.
 
-**Versions and updates:** `compose.yaml` uses the tag `latest`, which follows the newest state of the project. To
-stay on a version until you decide to move, write it instead, e.g. `ghcr.io/simonholzer/homelab-hub:1.3.0` (also
-`:1.3` for the newest 1.3.x and `:1` for the newest 1.x). All versions and what changed are under
-[Releases](https://github.com/simonholzer/Homelab-Hub/releases) and in [CHANGELOG.md](CHANGELOG.md). To update:
-
-```bash
-docker compose pull && docker compose up -d
-```
-
-Your config is kept. The gear menu shows the running version and, when there is one, a link to a newer release
-(the hub asks GitHub twice a day; `UPDATE_CHECK: "off"` stops that).
+**Update:** `docker compose pull && docker compose up -d`. Your config is kept; the gear menu shows the running
+version and tells you when there is a newer one. Versions and what changed: [Releases](https://github.com/simonholzer/Homelab-Hub/releases), [CHANGELOG.md](CHANGELOG.md).
 
 > **Who can open it?** Without a password, anyone who can reach the port can see the page and edit the config. That is
-> fine on a home network you trust. For anything else, set a password (below) or put a login proxy in front.
+> fine on a home network you trust. For anything else, set a password (gear menu → *Set a password*) or put a login
+> proxy in front.
 
-## Password login (optional)
-
-**On the page:** gear menu → **Set a password**. Choose whether it protects the whole page or only the editor. It can
-be changed or removed in the same place. It is stored as a salted hash in `hub-auth.json` next to the config; if you
-forget it, delete that file on the server.
-
-**In the compose file,** if you prefer it fixed there (it then can't be changed on the page):
-
-| Variable | Meaning |
-|---|---|
-| `HUB_PASSWORD` | The password. Unset or empty = no fixed password |
-| `HUB_PASSWORD_PROTECTS` | `all` (default): the whole page needs the login. `editor`: everyone sees the page, only the config editor needs it |
-
-The login lasts 30 days per browser; changing the password logs everyone out. Five wrong passwords lock that address
-for a minute. Use HTTPS (a reverse proxy) when the hub is reachable from outside your home network: over plain HTTP the
-password travels unencrypted.
-
-## Edit the config
-
-In Docker the file is `/config/services.yaml` (in the `hub-config` volume, or in the folder you mounted), created on the first start.
-[config/services.yaml](config/services.yaml) is a full example with every option.
-The hub re-reads the file every check cycle (about 30 s), no restart. A mistake never breaks the page: it keeps the last
-working version and shows a red box naming the problem.
-
-**On the page:** gear menu → **Edit services and settings**, or the pencil on a card or group. The *Visual* tab is a form for everything in the file: general settings
-(timing, home network, reverse proxy, language, Docker labels), hosts, server stats with storage tiles and other
-machines, and groups and services with add / remove / duplicate and an icon picker. Services and groups are reordered by
-dragging their handle (⠿), with mouse or finger; a service can be dragged into another group. The *YAML* tab is the
-same file as plain text.
-
-- **Found on this server** lists containers that publish a port and have no card yet. *Add* makes a normal card with
-  the home address filled in; you add the public address if there is one. Databases, caches and tunnels are left out.
-  It needs the docker-proxy from `compose.yaml`. The hub can't know your public addresses or which port is the web
-  page when a container publishes several, so check the card after adding.
-- **Import and backup** (at the end of the form): import the config of Homepage (`services.yaml`), Dashy (`conf.yml`)
-  or Homarr (JSON export); names, addresses, icons and descriptions are taken over, widgets are not. *Download a
-  backup* saves the config as a file, *Restore from a file* loads one. The hub also keeps the last 10 saved versions in
-  `backups/` next to the config.
-
-Problems
-are listed while you type, and a config with problems is not saved. Saving applies at once, keeps the comments and
-layout of everything you did not touch, and leaves the version before in `services.yaml.bak`.
-To switch the editor off, set `CONFIG_EDITOR: "off"`.
-
-In the gear menu each browser can also choose **compact cards** (more per row, one line each) and whether links open
-in a **new tab**.
+## A card in the YAML
 
 ```yaml
 hosts:
@@ -123,279 +64,18 @@ groups:
         containers: ["*immich*"]              # show container health (optional)
 ```
 
-| Field | Meaning |
+[config/services.yaml](config/services.yaml) is a full example with every option.
+
+## Documentation
+
+| | |
 |---|---|
-| `url` | Public address the card opens. Optional if `local` is set |
-| `local` | Address the card opens on the home network (optional; alone = "home network only") |
-| `icon` | Icon name (see below). Missing = default icon |
-| `description` | A short line under the name (optional) |
-| `check` | `http://…` / `https://…` (online = any answer below 500), `tcp://host:port` (port accepts connections), or `none` for a plain link |
-| `insecure` | `true` accepts a self-signed certificate on the check (Cockpit, Portainer) |
-| `containers` | Patterns (`*` wildcard) matched against container name, compose project or service name |
-| `hidden` | `true` keeps the entry but hides it |
-| `hosts` | Aliases usable as `{name}` in `url`, `local` and `check` |
-
-**Plain links:** a card with `check: none` is a bookmark: no dot, not counted as online or offline. Use it for
-things that are not services of yours, such as the router's page, a provider's dashboard or your notes.
-
-```yaml
-      - name: Router
-        description: Port forwarding, DHCP, Wi-Fi
-        local: http://192.168.1.1
-        check: none
-```
-
-**Icons:** write the name of any icon from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
-(`jellyfin`, `home-assistant`, `pi-hole` …). If the hub doesn't have it yet, it downloads the SVG once into `icons/`
-next to the config file and serves it itself from then on. In the editor's icon picker you can also paste a link to any
-`.svg` file. Only SVGs without scripts are accepted. `ICON_DOWNLOAD: "off"` stops the hub from fetching icons by itself.
-
-**Container health:** `healthy`, `running` (the image has no healthcheck), `starting`, `unhealthy`, `stopped`,
-`no container found` (the pattern matches nothing: look at `/api/containers`, linked in the footer).
-A group with `autoContainers: true` gives every card a badge when a container matches the card's name
-(`Uptime Kuma` finds `*uptime-kuma*`).
-
-## Cards from Docker labels
-
-Instead of writing a card into the YAML, put labels on the container. The card appears on the next check and goes
-away with the container:
-
-```yaml
-services:
-  grafana:
-    image: grafana/grafana
-    labels:
-      homelab-hub.name: Grafana                      # default: the compose service name
-      homelab-hub.url: https://grafana.example.com   # url and/or local is required
-      homelab-hub.local: http://{nas}:3000           # {host} shortcuts from the YAML work
-      homelab-hub.group: Monitoring                  # default: "Docker"
-      homelab-hub.icon: grafana
-      homelab-hub.check: http://{nas}:3000           # optional, like `check:` in the YAML
-```
-
-Also understood: `homelab-hub.description`, `homelab-hub.insecure: "true"`, `homelab-hub.hide: "true"`.
-Label cards join the group of the same name from the YAML (a card with the same name in the YAML wins), show the
-health of their container, and need the docker-proxy from `compose.yaml`. A label with a mistake is listed under
-`labelErrors` in `/api/containers`. Switch the feature off with `settings.dockerLabels: false`.
-
-## Stats from other machines
-
-The stats tiles at the top show the machine the hub runs on. To add another machine (a Raspberry Pi, a second
-server, a VPS), run the same image there in **agent mode**. An agent has no page and no config; it only answers the
-hub with that machine's numbers, and with its Docker containers.
-
-**On the other machine:** save [compose.agent.yaml](compose.agent.yaml) as `compose.yaml` and run `docker compose up -d`
-(or without Docker: `HUB_MODE=agent PORT=8081 node src/server.js`).
-
-**On the hub:** gear menu → Edit services and settings → *Machines*. Agents on the same network show up there by
-themselves under **Found on the network**: click **Add** (and type the token, if the agent has one). Otherwise
-*Other machines* → **Add machine**, or in the YAML:
-
-```yaml
-stats:
-  name: NAS                             # caption of the hub's own tiles
-  machines:
-    - name: Raspberry Pi
-      url: http://{pi}:8081             # the agent's address; {host} shortcuts work
-      token: a-long-random-text         # only if the agent has AGENT_TOKEN set
-      network: [eth0]                   # optional: cards for the network tile
-      disks:                            # optional: storage tiles, paths as the AGENT sees them
-        - { name: SD card, path: /pools/root, size: 29G }
-```
-
-Each machine gets its own row of tiles under its name. One that does not answer shows why (refused, timed out, wrong
-token) and never holds up the others. The hub asks every `statsIntervalSeconds`.
-
-| Agent variable | Meaning |
-|---|---|
-| `HUB_MODE=agent` | Start as an agent instead of as the hub |
-| `AGENT_TOKEN` | Optional shared secret. Without it, anyone who can reach the port can read the numbers |
-| `DOCKER_HOST` | That machine's Docker (a read-only socket proxy, as in compose.agent.yaml): its containers are reported too |
-| `AGENT_NAME` | The name the hub suggests when it finds this agent (default: the container's host name) |
-| `PORT`, `PROC_PATH`, `SYS_PATH` | As for the hub |
-
-### Containers on other machines
-
-An agent with `DOCKER_HOST` sends its containers along with its numbers. The hub treats them like its own:
-`containers:` patterns and *Container health badges* match them (the badge's tooltip names the machine), cards from
-[Docker labels](#cards-from-docker-labels) on that machine appear, and *Found on this server* also lists that
-machine's containers, with its address filled in. When an agent stops answering, its containers count for five more
-minutes, then the cards say "no container found".
-
-### Finding agents on the network
-
-The hub searches its home network for agents at start and every 10 minutes (or with *Search again* in the editor):
-it asks every address of the networks the server sits in on ports 8081 and 8080 for `/healthz`, and keeps the ones
-that answer as an agent. The networks come from the server's routing table (the `/proc` mount); Docker's own
-networks, VPNs and networks larger than /22 are left out. Nothing is added by itself.
-
-```yaml
-settings:
-  discovery:
-    enabled: true                 # false = never search
-    subnets: [192.168.1.0/24]     # instead of the networks found on the server
-    ports: [8081]                 # where your agents answer
-```
-
-`AGENT_DISCOVERY: "off"` in the hub's compose file switches the search off completely. An agent's `/healthz` answers
-without a token (name, version, whether it has Docker and a token): that is what the search looks for.
-
-Things to know: the agent only reports numbers, free space of the paths the hub asks for, and (with `DOCKER_HOST`)
-the list of its containers: names, images, state and published ports, never their environment or files. The token
-is stored in the hub's YAML, so everyone who may open the config editor can read it. Agent addresses and tokens are
-never sent to the page. Use the token, and HTTPS or a VPN, when the agent is reachable from outside your network.
-
-## Home network: local addresses
-
-Give a service a `local:` address and its card opens that address when you are on the home network.
-A service with only `local:` is shown greyed out as "home network only" when you are away.
-
-The hub decides per visit, on the server:
-
-1. Opened **directly on the LAN** (`http://192.168.1.10:8080`) = home.
-2. Opened **through a proxy or tunnel** = home when your address is a private one (a proxy on your LAN), or when your
-   public IP is the server's public IP or one of `settings.home.publicIps`.
-3. Otherwise away. The button at the top (**Home network / Away · auto**) switches Auto → Home → Away and remembers
-   the choice in that browser.
-
-For rule 2 the hub must learn the visitor's address from the proxy. Cloudflare's header is understood out of the box;
-for another proxy (Caddy, Traefik, Nginx Proxy Manager …) name its header:
-
-```yaml
-settings:
-  home:
-    clientIpHeader: x-forwarded-for     # or x-real-ip
-```
-
-The setting only decides which links the cards show. It is not a security feature.
-
-## Behind a login proxy
-
-Services behind a login proxy answer with the login page even when the service itself is dead, so checking their public
-address says nothing. The hub shows such a check as a grey **Unknown** dot instead of a false green one: for Cloudflare
-Access automatically, for your own login page when you list its host name:
-
-```yaml
-settings:
-  loginHosts: [auth.example.com]        # Authelia, Authentik, Keycloak ...
-```
-
-The fix is always the same: point `check:` at the service itself (server IP and port).
-
-## Appearance and language
-
-Gear menu → *Appearance*: theme and language (automatic / English / Deutsch), remembered per browser. Themes: automatic
-(follows the system), dark, light, [Catppuccin Mocha](https://catppuccin.com), [Nord](https://www.nordtheme.com),
-[Gruvbox](https://github.com/morhetz/gruvbox) and high contrast. `settings.language: de` in the YAML sets the default for everyone who has not chosen.
-Texts that come from the server (config problems, some check details) are English.
-Another language is one block in [public/i18n.js](public/i18n.js); see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### Themes of your own
-
-Gear menu → *Edit services and settings* → *Themes*: add a theme, pick the theme it starts from, and change colors
-with the color picker. A small preview shows the result; *Try on the page* shows it on the whole page until you
-close the editor. After saving, the theme is in everyone's theme list.
-
-In the YAML they live under `themes:`. A theme starts from a built-in one (`base:`, default `dark`) and changes only
-the colors it names:
-
-```yaml
-themes:
-  purple-night:
-    name: Purple night          # shown in the menu (default: the key)
-    base: dark                  # dark, light, catppuccin, nord, gruvbox or high-contrast
-    accent: "#b48eff"
-    bg: "#0d0b14"
-    panel: "#151221"
-```
-
-Colors: `bg`, `panel`, `panelHover`, `border`, `borderStrong`, `text`, `muted`, `accent`, `onAccent` (text on accent
-buttons), `up`, `down`, `warn`, `unknown` (the status dots), `track` (bar backgrounds), `shadow`. A color is `"#rgb"`,
-`"#rrggbb"` (with alpha too), `rgb(...)` or `hsl(...)`; put `#` colors in quotes, YAML reads `#` as a comment otherwise.
-A theme of your own can't be called like a built-in one. To share one, post its YAML block.
-
-## On a phone, and as an app
-
-The page adapts to small screens: one column of cards, and each machine's stats fold into one line (tap the caption
-to open them; the choice is remembered).
-
-To get it onto the home screen or into its own window:
-
-- **Android (Chrome):** menu ⋮ → *Add to Home screen* / *Install app*
-- **iPhone / iPad (Safari):** Share → *Add to Home Screen*
-- **Desktop (Chrome, Edge):** the install icon at the right end of the address bar, or menu → *Install Homelab Hub*
-
-Browsers only offer installing on `https://` addresses (and on `localhost`). On a plain `http://192.168.…` address
-"Add to Home screen" still makes a shortcut, but it opens as a normal browser tab. The hub does not work offline: it
-shows live data, so nothing is stored on the device.
-
-## Run it without Docker
-
-```bash
-npm install
-npm test                      # no network needed
-npm run demo                  # http://localhost:8099 with made-up services, containers, stats and a second machine
-npm run local                 # http://localhost:1212 with config/local.yaml (a copy of the example, made on the first run)
-```
-
-`npm run local` runs real checks against the addresses in `config/local.yaml` (git-ignored, so your real addresses can
-go there). On Windows and macOS there is no `/proc`, so the stats tiles show this computer's numbers, and without
-Docker there are no container badges.
-
-Environment variables:
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `PORT` | `8080` | Port to listen on |
-| `CONFIG_PATH` | `config/services.yaml` (`/config/services.yaml` in Docker) | The config file |
-| `DEFAULT_CONFIG_PATH` | | Copied to `CONFIG_PATH` when that doesn't exist yet |
-| `DOCKER_HOST` | empty | Docker API (`http://docker-proxy:2375`); empty = no container health, no label cards |
-| `PROC_PATH`, `SYS_PATH` | `/proc`, `/sys` | Where the host's stats are mounted |
-| `HUB_PASSWORD`, `HUB_PASSWORD_PROTECTS` | | Login, see above |
-| `CONFIG_EDITOR` | on | `off` removes the editor |
-| `ICON_DOWNLOAD` | on | `off` never fetches icons |
-| `UPDATE_CHECK` | on | `off` never asks GitHub for the latest version. `UPDATE_REPO` (`owner/name`) points it at a fork |
-| `PUID`, `PGID` | `1000` | Docker only: the user the hub runs as |
-| `HUB_MODE`, `AGENT_TOKEN` | | Agent mode, see "Stats from other machines" |
-
-## Open it like an app on Windows (taskbar)
-
-The browser's own "Install" (see above) is the simplest way. This script is the alternative for plain `http://`
-addresses, or to pick a specific Chrome profile:
-
-```bash
-powershell -ExecutionPolicy Bypass -File scripts\windows-shortcut.ps1 -Url https://hub.example.com/
-```
-
-Creates a **Homelab Hub** shortcut (Start menu and desktop) that opens the hub in its own Chrome window with the hub's
-icon. `-ProfileEmail you@example.com` or `-ProfileDir "Profile 1"` picks the Chrome profile. Pin it to the taskbar by
-hand: right-click the shortcut → **Pin to taskbar**.
-
-## How it works
-
-`src/monitor.js` checks everything on a timer and keeps the result in memory; the page (`public/`) only reads
-`/api/status`. Container health and labels come from Docker through a read-only socket proxy
-(`tecnativa/docker-socket-proxy` allows only "list containers"). Host stats are read from the host's `/proc` and `/sys`.
-
-- **Network** tile: download / upload speed over the physical network cards. Pick cards with `stats.network: [eno1]`.
-- **Groups open and close:** click a group's name. A group whose services are all offline starts closed.
-- **Pins:** the pin button on a card puts it into a **Pinned** section at the top, remembered per browser.
-- **Storage:** one tile per entry in `stats.disks`, each pointing at a folder mounted read-only into the container.
-  With `size:` (e.g. `size: 3.6T`) the tile shows used / total and a bar: a container can't read a ZFS pool's total, so
-  you set it once (`zfs list -Hp -o name,used,avail -d 0`, size = used + avail).
-- **Memory** "used" leaves out the ZFS cache (ARC), which is shown separately.
-- **Two timers** decide how fresh the data is: stats every `statsIntervalSeconds` (default 5 s), services and
-  containers every `checkIntervalSeconds` (default 30 s).
-
-| Path | What |
-|---|---|
-| `config/services.yaml`, `config/starter.yaml` | Full example config; the small one a new install starts with |
-| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `discover.js` (found on this server), `import.js`, `update.js`, `icons.js`, `editor.js` (config editor API) |
-| `public/` | The page: `index.html`, `app.js`, `style.css`, `i18n.js` (translations), `theme.js`, the login page, the config editor, `manifest.webmanifest` and app icons, `icons/` |
-| `test/` | `node --test` suites, with fake servers and `/proc` fixtures |
-| `Dockerfile`, `docker-entrypoint.sh`, `compose.yaml`, `compose.agent.yaml` | Docker: the hub, and the agent for other machines |
-| `compose.truenas.yaml`, `scripts/`, `DEPLOY.md` | Building on a TrueNAS box, helper scripts |
-| `CHANGELOG.md`, `.github/workflows/` | What changed per version; tests, image build and release on GitHub |
+| [Configuration](docs/configuration.md) | The editor, every field of a card, plain links, icons, container health, cards from Docker labels, settings, language |
+| [Themes](docs/themes.md) | Picking a theme, making your own in the editor, the colors, sharing and importing themes |
+| [Server stats and other machines](docs/machines.md) | Storage and network tiles, agents on other machines, their containers, finding agents |
+| [Login, home network and proxies](docs/access.md) | Password login, local addresses at home, reverse proxies, login proxies |
+| [Installing, updating and running](docs/install.md) | Versions, phone and app, running without Docker, environment variables, how it works |
+| [TrueNAS](DEPLOY.md) | Installing and updating on TrueNAS, building the image there |
 
 ## Contributing, credits, license
 
@@ -404,3 +84,4 @@ Bug reports and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md
 Most icons in `public/icons/` come from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0).
 The logos are trademarks of their respective owners and are used only to identify the services.
 `default`, `todo-sync`, `light`, `alarm`, `bluemap` and `terminal` were drawn for this project.
+The Catppuccin, Nord and Gruvbox palettes are MIT-licensed; see [docs/themes.md](docs/themes.md).

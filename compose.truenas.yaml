@@ -29,7 +29,7 @@ services:
       PROC_PATH: /host/proc
       SYS_PATH: /host/sys
       TZ: "Etc/UTC"             # your time zone, e.g. Europe/Berlin
-      # HUB_PASSWORD: "change-me"       # switch on the login (see README)
+      # HUB_PASSWORD: "change-me"       # switch on the login (see docs/access.md)
 
   # Read-only window onto Docker: only "list containers" is allowed (CONTAINERS=1).
   # Everything else (start/stop/exec/create ...) is refused by the proxy, so the hub

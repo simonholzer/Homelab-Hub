@@ -25,7 +25,7 @@ settings:
   # Host names of your own login pages (Authelia, Authentik ...): a check that gets redirected there
   # shows a grey "unknown" dot instead of a false green one. Cloudflare Access is recognised by itself.
   # loginHosts: [auth.example.com]
-  # Cards from Docker labels (homelab-hub.url, homelab-hub.name ..., see the README). On by default.
+  # Cards from Docker labels (homelab-hub.url, homelab-hub.name ..., see docs/configuration.md). On by default.
   # dockerLabels: false
   # Language for browsers that have not chosen one in the gear menu: auto (the browser's), en, de.
   # language: auto
@@ -67,7 +67,7 @@ stats:
       path: /pools/backup
       size: 1.8T
   # Other machines whose numbers are shown too, each in its own row of tiles. On that machine the
-  # same image runs in agent mode (compose.agent.yaml; README: "Stats from other machines").
+  # same image runs in agent mode (compose.agent.yaml; see docs/machines.md).
   # machines:
   #   - name: Raspberry Pi
   #     url: http://{pi}:8081          # the agent's address

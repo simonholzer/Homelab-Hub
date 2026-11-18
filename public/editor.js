@@ -23,7 +23,9 @@ const ICONS = {
   box: 'M4 7l8-4 8 4v10l-8 4-8-4zM4 7l8 4 8-4M12 11v10',
   fold: 'M7 10l5-5 5 5M7 14l5 5 5-5',
   palette: 'M12 3a9 9 0 1 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.6-.4-1 0-.8.7-1.4 1.5-1.4H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8zM7.5 11.5h.01M9.5 7.5h.01M14.5 7.5h.01M17 11h.01',
-  eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'
+  eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  share: 'M4 13v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6M12 3v12M7 8l5-5 5 5',
+  download: 'M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4M12 3v12M7 10l5 5 5-5'
 };
 
 /**
@@ -1277,11 +1279,133 @@ function renderForm() {
   renderNav();
 }
 
+// ---- color coding of the YAML text ----
+// The text box draws its text transparent; a <pre> behind it shows the same text in colors. Only colors,
+// never another font weight or size, so every character stays exactly where the text box has it.
+const YAML_CONST = /^(?:true|false|yes|no|on|off|null|~)$/i;
+const YAML_NUMBER = /^[-+]?(?:\d[\d_]*(?:\.\d+)?(?:e[-+]?\d+)?|\.\d+|0x[\da-f]+)$/i;
+
+function yamlSpan(out, cls, text) {
+  if (!text) return;
+  if (!cls) return void out.push(document.createTextNode(text));
+  const el = document.createElement('span');
+  el.className = `y-${cls}`;
+  el.textContent = text;
+  out.push(el);
+  return el;
+}
+
+/** A value: {host} shortcuts get their own color; a color value is underlined in that color. */
+function yamlValue(out, cls, text) {
+  const inner = cls === 'str' ? text.slice(1, -1) : text;
+  if (/^#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$|^(?:rgba?|hsla?)\([\d.%\s,/+-]+\)$/i.test(inner.trim())) {
+    const el = yamlSpan(out, `${cls} y-color`, text);
+    el.style.setProperty('--sw', inner.trim());
+    return;
+  }
+  for (const part of text.split(/(\{[A-Za-z0-9_-]+\})/)) yamlSpan(out, /^\{[A-Za-z0-9_-]+\}$/.test(part) ? 'ph' : cls, part);
+}
+
+/** One line of YAML -> spans. Knows keys, values, strings, numbers, comments, lists and { } [ ] flow parts. */
+function yamlLine(line, out) {
+  if (/^\s*(?:---|\.\.\.)\s*$/.test(line)) return yamlSpan(out, 'punct', line);
+  let i = 0;
+  const flow = []; // open { or [
+  let keyPos = true; // a key may start here
+  const rest = () => line.slice(i);
+  while (i < line.length) {
+    const ws = /^\s+/.exec(rest());
+    if (ws) {
+      yamlSpan(out, '', ws[0]);
+      i += ws[0].length;
+      continue;
+    }
+    const c = line[i];
+    if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
+      yamlSpan(out, 'comment', rest());
+      break;
+    }
+    if (c === '-' && keyPos && flow.length === 0 && /^-(?:\s|$)/.test(rest())) {
+      yamlSpan(out, 'punct', '-');
+      i += 1;
+      continue;
+    }
+    if (keyPos) {
+      const key = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#,[\]{}"'][^#,[\]{}:]*?|[^\s#,[\]{}"'][^,[\]{}]*?)(\s*):(?=\s|$|[,\]}])/.exec(rest());
+      if (key) {
+        yamlSpan(out, 'key', key[1]);
+        yamlSpan(out, '', key[2]);
+        yamlSpan(out, 'punct', ':');
+        i += key[0].length;
+        keyPos = false;
+        continue;
+      }
+    }
+    if (c === '{' || c === '[') {
+      flow.push(c);
+      yamlSpan(out, 'punct', c);
+      i += 1;
+      keyPos = c === '{';
+      continue;
+    }
+    if (c === '}' || c === ']' || c === ',') {
+      if (c !== ',') flow.pop();
+      yamlSpan(out, 'punct', c);
+      i += 1;
+      keyPos = c === ',' && flow.at(-1) === '{';
+      continue;
+    }
+    keyPos = false;
+    if (c === '"' || c === "'") {
+      const str = c === '"' ? /^"(?:[^"\\]|\\.)*"?/.exec(rest()) : /^'(?:[^']|'')*'?/.exec(rest());
+      yamlValue(out, 'str', str[0]);
+      i += str[0].length;
+      continue;
+    }
+    if ((c === '|' || c === '>' || c === '&' || c === '*' || c === '!') && /^[|>][-+\d]*(?:\s|$)|^[&*!][^\s,[\]{}]*/.test(rest())) {
+      const m = /^[|>][-+\d]*|^[&*!][^\s,[\]{}]*/.exec(rest());
+      yamlSpan(out, 'punct', m[0]);
+      i += m[0].length;
+      continue;
+    }
+    // a plain value: up to a comment, or in { } / [ ] up to the next , } or ]
+    const plain = (flow.length ? /^[^,[\]{}]*?(?=\s+#|[,\]}]|$)/ : /^.*?(?=\s+#|$)/).exec(rest())[0] || c;
+    const trimmed = plain.trimEnd();
+    yamlValue(out, YAML_NUMBER.test(trimmed) ? 'num' : YAML_CONST.test(trimmed) ? 'const' : 'val', trimmed);
+    yamlSpan(out, '', plain.slice(trimmed.length));
+    i += plain.length;
+  }
+}
+
+function highlightYaml(text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    yamlLine(line, out);
+    out.push(document.createTextNode('\n'));
+  }
+  out.push(document.createTextNode(' ')); // a last empty line still has its height
+  return out;
+}
+
 function renderYaml() {
   const area = h('textarea', { class: 'cfg-yaml', spellcheck: 'false', autocomplete: 'off', autocapitalize: 'off', wrap: 'off', 'aria-label': 'YAML text' });
+  const colors = h('pre', { class: 'cfg-yamlhl', 'aria-hidden': 'true' });
   area.value = st.text;
+  let frame = 0;
+  const paint = () => {
+    frame = 0;
+    colors.replaceChildren(...highlightYaml(area.value));
+    colors.scrollTop = area.scrollTop;
+    colors.scrollLeft = area.scrollLeft;
+  };
+  paint();
+  area.addEventListener('scroll', () => {
+    colors.scrollTop = area.scrollTop;
+    colors.scrollLeft = area.scrollLeft;
+  });
   area.addEventListener('input', () => {
     st.text = area.value;
+    frame ||= requestAnimationFrame(paint);
     touched();
   });
   area.addEventListener('keydown', (e) => {
@@ -1290,7 +1414,7 @@ function renderYaml() {
     area.setRangeText('  ', area.selectionStart, area.selectionEnd, 'end');
     area.dispatchEvent(new Event('input'));
   });
-  ui.main.replaceChildren(area);
+  ui.main.replaceChildren(h('div', { class: 'cfg-yamlbox' }, colors, area));
 }
 
 function render() {
@@ -1336,6 +1460,7 @@ function openPositions() {
 async function save() {
   if (!st || st.busy || !isDirty()) return;
   const wasOpen = st.tab === 'visual' ? openPositions() : [];
+  const openThemes = st.tab === 'visual' && isObject(st.model?.themes) ? Object.keys(st.model.themes).filter((k) => st.open.has(st.model.themes[k])) : [];
   st.busy = true;
   updateStatus();
   try {
@@ -1347,6 +1472,7 @@ async function save() {
         const svc = st.model?.groups?.[gi]?.services?.[si];
         if (isObject(svc)) st.open.add(svc);
       }
+      for (const k of openThemes) if (isObject(st.model?.themes?.[k])) st.open.add(st.model.themes[k]);
       st.note = t('Saved. The hub is using it now.');
       render();
       ui.main.scrollTop = scroll;
@@ -1500,17 +1626,148 @@ function themePreview(vars) {
   return box;
 }
 
+/** A row of small color dots: what a closed theme looks like at a glance. */
+function themeDots(vars) {
+  const row = h('span', { class: 'cfg-tdots', 'aria-hidden': 'true' });
+  for (const v of ['--bg', '--panel', '--text', '--accent', '--up', '--down']) {
+    const dot = h('i');
+    if (vars[v]) dot.style.setProperty('--c', vars[v]);
+    row.append(dot);
+  }
+  return row;
+}
+
+/** One theme as a YAML block that can be pasted into another hub (Import, or the YAML itself). */
+function themeYaml(id, th) {
+  const lines = ['themes:', `  ${id}:`];
+  for (const k of ['name', 'base', ...THEME_COLORS.map(([c]) => c)]) {
+    if (th[k] != null && th[k] !== '') lines.push(`    ${k}: ${JSON.stringify(String(th[k]))}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** Copies text; also works on plain http:// addresses, where the clipboard API is not offered. */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = h('textarea', { class: 'cfg-offscreen', 'aria-hidden': 'true' });
+    area.value = text;
+    dlg.append(area); // inside the dialog: outside it nothing can be selected while the dialog is open
+    area.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    area.remove();
+    return ok;
+  }
+}
+
+/** A free key for a theme: `wanted`, else wanted-2, wanted-3 ... (never a built-in name). */
+function freeThemeId(wanted) {
+  const all = isObject(st.model.themes) ? st.model.themes : {};
+  const base = (String(wanted ?? '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|-+$/g, '').slice(0, 34) || 'theme');
+  let id = base;
+  for (let i = 2; Object.hasOwn(all, id) || isBuiltinTheme(id); i++) id = `${base}-${i}`;
+  return id;
+}
+
+/** The themes in a pasted YAML text: a whole `themes:` block, several themes, or the colors of one. */
+function themesIn(model) {
+  const known = new Set(['name', 'base', ...THEME_COLORS.map(([c]) => c)]);
+  const isTheme = (v) => isObject(v) && Object.keys(v).some((k) => k === 'base' || (known.has(k) && k !== 'name'));
+  const keep = (v) => Object.fromEntries(Object.entries(v).filter(([k, x]) => known.has(k) && (typeof x === 'string' || typeof x === 'number')).map(([k, x]) => [k, String(x)]));
+  const map = isObject(model.themes) ? model.themes : model;
+  if (isTheme(map)) return [[map.name ?? 'imported', keep(map)]];
+  return Object.entries(map).filter(([, v]) => isTheme(v)).map(([k, v]) => [k, keep(v)]);
+}
+
+/** Adds the themes of a YAML text to the form; returns how many. The hub reads the YAML (one parser for everything). */
+async function importThemes(text) {
+  const { status, data } = await api('POST', '/api/config/render', { text });
+  if (status !== 200) throw new Error(tr(data.error ?? 'The text could not be read.'));
+  if (!isObject(data.model)) throw new Error(data.errors?.[0] ?? t('No theme found in the text.'));
+  const found = themesIn(data.model);
+  if (found.length === 0) throw new Error(t('No theme found in the text.'));
+  const all = child(st.model, 'themes');
+  for (const [wanted, th] of found) {
+    all[freeThemeId(wanted)] = th;
+    st.open.add(th);
+  }
+  return found.length;
+}
+
 function themeBox(id, th) {
   const m = st.model;
   const base = themeBase(th);
+  const open = st.open.has(th);
   const vars = () => ({ ...baseColors(base), ...themeForPage(id, th).colors });
   let preview = themePreview(vars());
+  let dots = themeDots(vars());
   const repaint = () => {
     const next = themePreview(vars());
     preview.replaceWith(next);
     preview = next;
+    const nextDots = themeDots(vars());
+    dots.replaceWith(nextDots);
+    dots = nextDots;
     if (trying === id) window.hubTheme?.apply(id, themeForPage(id, th));
   };
+  const baseName = builtinThemes().find((b) => b.id === base)?.name ?? base;
+  const title = h('span', { class: 'cfg-svcname', rawText: th.name || id });
+  const summary = h(
+    'button',
+    { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' },
+    svg('chev', 14),
+    dots,
+    h('span', { class: 'cfg-svctext' }, title, h('span', { class: 'cfg-svcsub', rawText: `${id} · ${t('starts from {name}', { name: t(baseName) })}` }))
+  );
+  summary.addEventListener('click', () => {
+    if (open) st.open.delete(th);
+    else st.open.add(th);
+    const next = themeBox(id, th); // only this theme is drawn again
+    el.replaceWith(next);
+    next.querySelector('.cfg-svcsum').focus();
+  });
+
+  const tryBtn = iconBtn('eye', trying === id ? t('Stop trying') : t('Try on the page'), () => {
+    if (trying === id) restoreTheme();
+    else {
+      trying = id;
+      window.hubTheme?.apply(id, themeForPage(id, th));
+    }
+    renderForm();
+  });
+  if (trying === id) tryBtn.classList.add('on');
+  const share = iconBtn('share', t('Copy as YAML (to share it)'), async () => {
+    st.note = (await copyText(themeYaml(id, th))) ? t('Copied. Paste it anywhere to share the theme; Import adds it to another hub.') : t('Could not copy. Switch to YAML and copy the block from there.');
+    updateStatus();
+  });
+  const duplicate = iconBtn('copy', 'Duplicate', () => {
+    const copy = JSON.parse(JSON.stringify(th));
+    copy.name = t('{name} copy', { name: th.name || id });
+    const all = child(m, 'themes');
+    const nextId = freeThemeId(`${id}-copy`);
+    // the copy goes right after the original
+    m.themes = Object.fromEntries(Object.entries(all).flatMap(([k, v]) => (k === id ? [[k, v], [nextId, copy]] : [[k, v]])));
+    st.open.add(copy);
+    touched();
+    renderForm();
+  });
+  const remove = iconBtn('trash', t('Remove theme {name}', { name: th.name || id }), () => {
+    if (trying === id) restoreTheme();
+    delete m.themes[id];
+    touched();
+    renderForm();
+  }, { danger: true });
+
+  const head = h('div', { class: 'cfg-svchead' }, summary, h('span', { class: 'cfg-acts' }, tryBtn, share, duplicate, remove));
+  const el = h('section', { class: `cfg-svc cfg-theme${open ? ' open' : ''}` }, head);
+  if (!open) return el;
 
   const key = h('input', { type: 'text', class: 'cfg-in mono', 'aria-label': 'Name in the file', spellcheck: 'false', autocomplete: 'off' });
   key.value = id;
@@ -1558,46 +1815,104 @@ function themeBox(id, th) {
     return h('div', { class: 'cfg-f' }, h('span', { class: 'cfg-l', text: label }), h('div', { class: 'cfg-color' }, picker, text, reset));
   });
 
-  const tryBtn = textBtn('eye', trying === id ? 'Stop trying' : 'Try on the page', () => {
-    if (trying === id) restoreTheme();
-    else {
-      trying = id;
-      window.hubTheme?.apply(id, themeForPage(id, th));
-    }
-    renderForm();
-  }, trying === id ? 'primary' : '');
-  const remove = iconBtn('trash', t('Remove theme {name}', { name: th.name || id }), () => {
-    if (trying === id) restoreTheme();
-    delete m.themes[id];
+  const nameIn = input(() => th.name, (v) => put(th, 'name', v), { placeholder: id, label: 'Name in the menu', after: () => (title.textContent = th.name || id) });
+  el.append(
+    h(
+      'div',
+      { class: 'cfg-svcform' },
+      h(
+        'div',
+        { class: 'cfg-themetop' },
+        h(
+          'div',
+          { class: 'cfg-grid' },
+          field('Name in the menu', nameIn),
+          grid(2, field('Name in the file', key, 'Letters, digits, - and _.'), field('Starts from', baseSel, 'Colors you leave empty come from here.'))
+        ),
+        preview
+      ),
+      grid(3, ...colors)
+    )
+  );
+  return el;
+}
+
+/** The box where a theme someone shared is pasted (or loaded from a file). */
+function themeImportBox() {
+  const area = h('textarea', { class: 'cfg-in mono cfg-paste', rows: 7, spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Theme to import', placeholder: 'themes:\n  purple-night:\n    base: dark\n    accent: "#b48eff"' });
+  area.value = st.themeImport?.text ?? '';
+  area.addEventListener('input', () => (st.themeImport.text = area.value));
+  const done = (n) => {
+    st.themeImport = null;
+    st.note = n === 1 ? t('1 theme imported. Check it, then save.') : t('{n} themes imported. Check them, then save.', { n });
     touched();
     renderForm();
-  }, { danger: true });
-
-  return h(
-    'section',
-    { class: 'cfg-sec cfg-theme' },
-    h('div', { class: 'cfg-themehead' }, input(() => th.name, (v) => put(th, 'name', v), { big: true, placeholder: id, label: 'Name in the menu' }), tryBtn, remove),
-    h('div', { class: 'cfg-themetop' }, grid(2, field('Name in the file', key, 'Letters, digits, - and _.'), field('Starts from', baseSel, 'Colors you leave empty come from here.')), preview),
-    grid(3, ...colors)
+  };
+  const fail = (err) => {
+    st.note = err.message;
+    updateStatus();
+  };
+  const go = textBtn('plus', 'Import', () => importThemes(area.value).then(done, fail), 'primary');
+  const file = textBtn(null, 'From a file…', async () => {
+    const f = await pickFile('.yaml,.yml,.txt');
+    if (f) importThemes(f.text).then(done, fail);
+  });
+  const cancel = textBtn(null, 'Cancel', () => {
+    st.themeImport = null;
+    renderForm();
+  });
+  return section(
+    'cfg-themeimport',
+    'Import themes',
+    'Paste a theme someone shared: the YAML block that "Copy as YAML" gives, a whole themes: section, or just the colors. Themes with a name you already use get a number added.',
+    area,
+    h('div', { class: 'cfg-tools' }, go, file, cancel)
   );
 }
 
 function secThemes() {
   const m = st.model;
   const themes = isObject(m.themes) ? m.themes : {};
-  const boxes = Object.entries(themes).map(([id, th]) => (isObject(th) ? themeBox(id, th) : null));
-  const add = textBtn('plus', 'Add theme', () => {
+  const list = Object.entries(themes).filter(([, th]) => isObject(th));
+  const boxes = list.map(([id, th]) => themeBox(id, th));
+  const add = () => {
     const all = child(m, 'themes');
-    let name = 'my-theme';
-    for (let i = 2; Object.hasOwn(all, name); i++) name = `my-theme-${i}`;
-    all[name] = { name: t('My theme'), base: 'dark' };
+    const th = { name: t('My theme'), base: 'dark' };
+    all[freeThemeId('my-theme')] = th;
+    st.open.add(th);
     touched();
     renderForm();
-    const heads = ui.main.querySelectorAll('.cfg-themehead input');
-    heads[heads.length - 1]?.select();
-    heads[heads.length - 1]?.scrollIntoView({ block: 'center' });
-  }, 'wide');
-  return [...boxes, boxes.length === 0 ? h('p', { class: 'cfg-empty', text: 'No themes of your own yet.' }) : null, h('div', { id: 'cfg-themes', class: 'cfg-add' }, add)];
+    const last = [...ui.main.querySelectorAll('.cfg-theme')].pop();
+    last?.scrollIntoView({ block: 'center' });
+    last?.querySelector('.cfg-svcform input')?.select();
+  };
+  const anyOpen = list.some(([, th]) => st.open.has(th));
+  const bar = h(
+    'div',
+    { class: 'cfg-toolbar' },
+    textBtn('download', 'Import themes…', () => {
+      st.themeImport = st.themeImport ? null : { text: '' };
+      renderForm();
+      ui.main.querySelector('.cfg-paste')?.focus();
+    }),
+    list.length > 1
+      ? textBtn('fold', anyOpen ? 'Close all' : 'Open all', () => {
+          for (const [, th] of list) {
+            if (anyOpen) st.open.delete(th);
+            else st.open.add(th);
+          }
+          renderForm();
+        })
+      : null,
+    textBtn('plus', 'Add theme', add)
+  );
+  return [
+    bar,
+    st.themeImport ? themeImportBox() : null,
+    h('div', { class: 'cfg-svcs' }, ...boxes),
+    boxes.length === 0 ? h('p', { class: 'cfg-empty', text: 'No themes of your own yet. Add one, or import one someone shared.' }) : null,
+    h('div', { id: 'cfg-themes', class: 'cfg-add' }, textBtn('plus', 'Add theme', add, 'wide'))
+  ];
 }
 
 function build() {

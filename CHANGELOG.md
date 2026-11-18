@@ -2,6 +2,18 @@
 
 Every released version, newest first. The Docker image of a version is `ghcr.io/simonholzer/homelab-hub:<version>`.
 
+## 1.6.0
+
+- **Themes fold up.** In the editor each theme is a box that opens and closes; closed, it shows its colors as dots.
+  *Open all / Close all*, *Duplicate*, and *Copy as YAML* to share a theme.
+- **Import themes.** Paste a theme someone shared (or load it from a file) on the Themes page.
+- **Color coding in the YAML view** of the editor: keys, values, strings, numbers, comments and `{host}` shortcuts
+  each have their own color; color values are underlined in their color.
+- **Docs reorganised.** The README only has what you need to start; the details moved to `docs/` (configuration,
+  themes with a guide for making and sharing one, machines, login and network, installing).
+
+Updating needs no changes.
+
 ## 1.5.0
 
 - **More themes.** Catppuccin Mocha, Nord, Gruvbox and high contrast join dark and light (gear menu → Appearance).

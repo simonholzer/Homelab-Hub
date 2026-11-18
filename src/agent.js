@@ -97,7 +97,7 @@ export function createAgentApp({ reader, token = '', containers = null, name = '
     const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
     // open to anyone (no token): just enough for the hub's network search to recognise an agent
     if (pathname === '/healthz') return send(res, 200, { ok: true, mode: 'agent', id, name, version, docker: docker != null, token: wanted != null });
-    if (pathname !== AGENT_PATH) return send(res, 404, { error: 'This is a Homelab Hub agent: it only answers the hub (see the README, "Stats from other machines").' });
+    if (pathname !== AGENT_PATH) return send(res, 404, { error: 'This is a Homelab Hub agent: it only answers the hub (see docs/machines.md).' });
     if (req.method !== 'GET' && req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
     if (wanted) {
       const given = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? '')?.[1] ?? '';

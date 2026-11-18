@@ -25,8 +25,7 @@ Either way takes a minute:
 Your config, icons and password are kept in both cases. The gear menu of the hub shows the running version and a link
 when a newer one exists.
 
-To show the stats of other machines too, run [compose.agent.yaml](compose.agent.yaml) on them (README, "Stats from
-other machines"). On a second TrueNAS box that is another custom app with that file. The rest of this page is only needed for the other way.
+To show the stats of other machines too, run [compose.agent.yaml](compose.agent.yaml) on them ([docs/machines.md](docs/machines.md)). On a second TrueNAS box that is another custom app with that file. The rest of this page is only needed for the other way.
 
 ## The other way: build the image on the NAS
 
@@ -101,7 +100,7 @@ after the copy step: it builds the image **and** replaces the config (the old on
 
 ## Cloudflare Tunnel (optional)
 
-To reach the hub from outside, either set `HUB_PASSWORD` (see the README) or put it behind a
+To reach the hub from outside, either set `HUB_PASSWORD` (see [docs/access.md](docs/access.md)) or put it behind a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) with a
 Cloudflare Access application in front:
 

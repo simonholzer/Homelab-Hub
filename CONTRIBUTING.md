@@ -20,7 +20,8 @@ server when a file in `src/` changes.
 - **A broken config never takes the page down.** New settings are validated in `src/config.js` and get a readable error.
 - **Text from the config never becomes HTML.** Use `textContent` (the `h()` helper does).
 - **Tests for behaviour changes.** They live in `test/` and run with `node --test`.
-- Document new settings in `config/services.yaml` (the full example) and the README.
+- Document new settings in `config/services.yaml` (the full example) and in the matching page in `docs/`. The README
+  only has what is needed to get started; details go into `docs/`.
 
 ## Translations
 
@@ -40,6 +41,11 @@ English, so a partial translation is fine.
 
 New text in the page goes through `t('…')` (in the config editor, `h()` translates `text`, `title`, `aria-label` and
 `placeholder` by itself), with an entry in every dictionary.
+
+## Themes
+
+A new built-in theme is a block in `public/style.css` and an entry in `public/theme.js` and `src/config.js`; see
+[docs/themes.md](docs/themes.md#adding-a-built-in-theme-for-contributors).
 
 ## Icons
 

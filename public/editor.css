@@ -296,20 +296,42 @@ body.cfg-dragging, body.cfg-dragging * { cursor: grabbing !important; user-selec
 .cfg-chip:hover { border-color: var(--accent); }
 
 /* ---- YAML text ---- */
-.cfg-main:has(> .cfg-yaml) { padding: 0; overflow: hidden; }
-.cfg-yaml {
-  flex: 1;
+.cfg-main:has(> .cfg-yamlbox) { padding: 0; overflow: hidden; }
+/* the text box (transparent text, visible cursor and selection) lies exactly on top of the colored copy */
+.cfg-yamlbox { position: relative; flex: 1; min-height: 0; background: var(--bg); }
+.cfg-yaml, .cfg-yamlhl {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  min-height: 0;
+  height: 100%;
+  margin: 0;
   padding: 16px 20px;
   border: 0;
-  background: var(--bg);
-  color: var(--text);
   font: 0.84rem/1.55 ui-monospace, "Cascadia Code", Consolas, monospace;
+  letter-spacing: normal;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
   tab-size: 2;
-  resize: none;
   white-space: pre;
+  overflow-wrap: normal;
 }
+.cfg-yamlhl { overflow: hidden; padding-bottom: 60px; color: var(--text); pointer-events: none; }
+.cfg-yaml {
+  resize: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text);
+}
+.cfg-yaml::selection { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.y-key { color: var(--accent); }
+.y-str { color: var(--up); }
+.y-val { color: var(--text); }
+.y-num, .y-const { color: var(--warn); }
+.y-ph { color: color-mix(in srgb, var(--accent) 55%, var(--warn)); }
+.y-comment { color: var(--muted); font-style: normal; }
+.y-punct { color: var(--muted); }
+.y-color { text-decoration: underline 3px var(--sw); text-underline-offset: 3px; }
 
 /* ---- foot ---- */
 .cfg-problems {
@@ -367,8 +389,15 @@ body.cfg-dragging, body.cfg-dragging * { cursor: grabbing !important; user-selec
 }
 
 /* ---- themes ---- */
-.cfg-themehead { display: flex; align-items: center; gap: 8px; }
-.cfg-themehead .cfg-in { flex: 1; }
+/* a theme is a fold-out box like a service; closed it shows its colors as dots */
+.cfg-theme { background: var(--panel); }
+.cfg-tdots { display: flex; flex: none; padding: 3px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--bg); }
+.cfg-tdots i { width: 12px; height: 12px; margin-left: -3px; border: 2px solid var(--panel); border-radius: 50%; background: var(--c, transparent); }
+.cfg-tdots i:first-child { margin-left: 0; }
+.cfg-ib.on { background: var(--accent); color: var(--on-accent); }
+.cfg-ib.on:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+.cfg-paste { min-height: 120px; resize: vertical; white-space: pre; }
+.cfg-offscreen { position: fixed; top: -1000px; left: 0; width: 1px; height: 1px; opacity: 0; }
 .cfg-themetop { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 14px; align-items: start; }
 .cfg-color { display: flex; align-items: center; gap: 6px; }
 .cfg-color .cfg-in { flex: 1; min-width: 0; }
