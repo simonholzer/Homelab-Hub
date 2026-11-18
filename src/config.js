@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { parse } from 'yaml';
+import { widgetRef, resolveWidget } from './widgets.js';
 
 export const DEFAULT_SETTINGS = { checkIntervalSeconds: 30, timeoutSeconds: 4, statsIntervalSeconds: 5 };
 export const LANGUAGES = ['auto', 'en', 'de'];
@@ -169,8 +170,13 @@ function normalizeCheck(raw, service, hosts, where, errors, loginHosts = []) {
   return null;
 }
 
-/** Validates the parsed YAML. Returns {config, errors}; config is null when unusable. */
-export function normalizeConfig(raw) {
+/**
+ * Validates the parsed YAML. Returns {config, errors}; config is null when unusable.
+ * @param {object} [o]
+ * @param {object} [o.widgets]  the widgets of widgets.yaml (see widgets.js), for cards with `widget:`
+ * @param {object} [o.env]      where {env:NAME} in a widget is read from (default: the hub's environment)
+ */
+export function normalizeConfig(raw, { widgets = {}, env = process.env } = {}) {
   const errors = [];
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
     return { config: null, errors: ['The file must contain a YAML mapping (title:, groups:, ...)'] };
@@ -277,6 +283,59 @@ export function normalizeConfig(raw) {
     });
   }
 
+  /** The widget a card or tile asks for, resolved for its address; null when there is none (or it is wrong). */
+  const widgetOf = (svc, label, base) => {
+    const ref = widgetRef(svc.widget, label, errors);
+    if (!ref) return null;
+    const def = Object.hasOwn(widgets, ref.use) ? widgets[ref.use] : null;
+    if (!def) {
+      errors.push(`${label}.widget: there is no widget "${ref.use}" in widgets.yaml${Object.keys(widgets).length ? ` (there are: ${Object.keys(widgets).join(', ')})` : ''}`);
+      return null;
+    }
+    return resolveWidget(ref, def, { base, hosts, env, insecure: svc.insecure === true }, label, errors);
+  };
+
+  /**
+   * A widget tile: only a widget's values, on a tile of its own (type: widget in a group, or an entry of
+   * tiles:). Its url/local is where the widget asks (and where a click on the tile goes); both are optional.
+   */
+  const normalizeTile = (svc, id, where) => {
+    if (!svc || typeof svc !== 'object' || Array.isArray(svc)) {
+      errors.push(`${where}: must be a mapping with a widget`);
+      return null;
+    }
+    if (svc.hidden === true) return null;
+    const label = `${where}${typeof svc.name === 'string' && svc.name.trim() ? ` (${svc.name.trim()})` : ''}`;
+    if (svc.widget == null || svc.widget === '') {
+      errors.push(`${label}: a widget tile needs a widget (widget: <name from widgets.yaml>)`);
+      return null;
+    }
+    const url = svc.url == null ? '' : interpolate(String(svc.url), hosts, `${label}.url`, errors);
+    const localUrl = svc.local == null ? '' : interpolate(String(svc.local), hosts, `${label}.local`, errors);
+    if (url && !isHttpUrl(url)) errors.push(`${label}.url: must be a full http:// or https:// address`);
+    if (localUrl && !isHttpUrl(localUrl)) errors.push(`${label}.local: must be a full http:// or https:// address`);
+    const widget = widgetOf(svc, label, localUrl || url);
+    const ref = widgetRef(svc.widget, label, []);
+    const def = ref && Object.hasOwn(widgets, ref.use) ? widgets[ref.use] : null;
+    // a click on the tile opens the tile's own address, else the widget's
+    const own = def?.address ? interpolate(def.address, hosts, `${label}.widget address`, []) : '';
+    return {
+      id,
+      tile: true,
+      name: typeof svc.name === 'string' && svc.name.trim() ? svc.name.trim() : def?.name ?? ref?.use ?? 'Widget',
+      url: isHttpUrl(url) ? url : '',
+      localUrl: isHttpUrl(localUrl) ? localUrl : !url && isHttpUrl(own) ? own : '',
+      description: '',
+      icon: svc.icon == null ? def?.icon ?? '' : String(svc.icon),
+      check: null,
+      ...(widget ? { widget } : {}),
+      containers: [],
+      autoContainers: false
+    };
+  };
+
+  if (raw.tiles != null) errors.push('tiles: widget rows are groups now: a group with  type: widgets  and the tiles under services:');
+
   const groups = [];
   if (raw.groups != null && !Array.isArray(raw.groups)) {
     errors.push('groups: must be a list of groups');
@@ -291,9 +350,25 @@ export function normalizeConfig(raw) {
         errors.push(`${gWhere} (${g.name}): needs a services: list`);
         return;
       }
+      // a widget row: a group that holds widget tiles only
+      if (g.type != null && g.type !== 'widgets') errors.push(`${gWhere}.type: must be widgets (a widget row) or left out`);
+      const row = g.type === 'widgets';
       const services = [];
       g.services.forEach((svc, si) => {
         const where = `${g.name} → services[${si}]`;
+        if (svc && typeof svc === 'object' && svc.type != null && !['card', 'widget'].includes(svc.type)) {
+          errors.push(`${where}.type: must be card (the default) or widget`);
+          return;
+        }
+        if (row && svc && typeof svc === 'object' && svc.type != null && svc.type !== 'widget') {
+          errors.push(`${where}: only widget tiles go into a widget row`);
+          return;
+        }
+        if (row || svc?.type === 'widget') {
+          const tile = normalizeTile(svc, `g${gi}s${si}`, where);
+          if (tile) services.push(tile);
+          return;
+        }
         if (!svc || typeof svc.name !== 'string' || !svc.name.trim()) {
           errors.push(`${where}: needs a name`);
           return;
@@ -317,6 +392,8 @@ export function normalizeConfig(raw) {
           return;
         }
         const check = normalizeCheck(svc.check, { ...svc, url: url || localUrl }, hosts, label, errors, settings.loginHosts);
+        // a few values from the service's own API (widgets.yaml)
+        const widget = widgetOf(svc, label, localUrl || url);
         services.push({
           id: `g${gi}s${si}`,
           name: svc.name.trim(),
@@ -325,6 +402,7 @@ export function normalizeConfig(raw) {
           description: svc.description == null ? '' : String(svc.description),
           icon: svc.icon == null ? '' : String(svc.icon),
           check,
+          ...(widget ? { widget } : {}),
           containers: asList(svc.containers),
           // no containers: of its own, but the group asks for automatic matching by name
           autoContainers: g.autoContainers === true && asList(svc.containers).length === 0
@@ -334,6 +412,7 @@ export function normalizeConfig(raw) {
         id: `g${gi}`,
         name: g.name.trim(),
         icon: g.icon == null ? '' : String(g.icon),
+        ...(row ? { type: 'widgets' } : {}),
         services
       });
     });
@@ -354,7 +433,8 @@ export function normalizeConfig(raw) {
         // network cards to count (default: all physical ones)
         network: asList(raw.stats?.network).map(String).filter((n) => /^[\w.:@-]+$/.test(n))
       },
-      groups
+      groups,
+      widgets // the widgets of widgets.yaml, for cards made from Docker labels
     },
     errors: []
   };
@@ -384,9 +464,9 @@ export function servicesFromLabels(containers, config) {
     if (seen.has(key)) continue; // several replicas of one service: one card
     seen.add(key);
     const svc = { name, containers: [c.name] };
-    for (const k of ['url', 'local', 'icon', 'check', 'description']) if (l[k] != null && l[k] !== '') svc[k] = l[k];
+    for (const k of ['url', 'local', 'icon', 'check', 'description', 'widget']) if (l[k] != null && l[k] !== '') svc[k] = l[k];
     if (String(l.insecure ?? '').toLowerCase() === 'true') svc.insecure = true;
-    const one = normalizeConfig({ hosts: config.hosts ?? {}, settings: { loginHosts: config.settings?.loginHosts ?? [] }, groups: [{ name: groupName, services: [svc] }] });
+    const one = normalizeConfig({ hosts: config.hosts ?? {}, settings: { loginHosts: config.settings?.loginHosts ?? [] }, groups: [{ name: groupName, services: [svc] }] }, { widgets: config.widgets ?? {} });
     if (!one.config) {
       errors.push(...one.errors.map((e) => `container ${c.name}: ${e}`));
       continue;
@@ -400,8 +480,12 @@ export function servicesFromLabels(containers, config) {
   return { groups: [...groups.values()], errors };
 }
 
-/** Parses YAML text. YAML syntax errors come back as errors, never as exceptions. */
-export function parseConfigText(text) {
+/**
+ * Parses YAML text. YAML syntax errors come back as errors, never as exceptions.
+ * @param {string} text
+ * @param {object} [o]  passed on to normalizeConfig (widgets, env)
+ */
+export function parseConfigText(text, o) {
   let raw;
   try {
     raw = parse(text);
@@ -411,7 +495,7 @@ export function parseConfigText(text) {
     const first = String(err.message).split('\n')[0];
     return { config: null, errors: [`YAML syntax error${where}: ${first}`] };
   }
-  return normalizeConfig(raw);
+  return normalizeConfig(raw, o);
 }
 
 /**

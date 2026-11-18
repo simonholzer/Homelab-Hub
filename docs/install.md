@@ -73,6 +73,7 @@ numbers, and without Docker there are no container badges.
 | `ICON_DOWNLOAD` | on | `off` never fetches icons |
 | `UPDATE_CHECK` | on | `off` never asks GitHub for the latest version. `UPDATE_REPO` (`owner/name`) points it at a fork |
 | `AGENT_DISCOVERY` | on | `off` never searches the network for agents |
+| `WIDGETS_PATH` | `widgets.yaml` next to the config | The widgets file, see [widgets.md](widgets.md). Any other variable can hold a widget's key (`{env:NAME}`) |
 | `PUID`, `PGID` | `1000` | Docker only: the user the hub runs as |
 | `HUB_MODE`, `AGENT_TOKEN`, `AGENT_NAME` | | Agent mode, see [machines.md](machines.md) |
 
@@ -86,8 +87,8 @@ containers every `checkIntervalSeconds` (default 30 s).
 
 | Path | What |
 |---|---|
-| `config/services.yaml`, `config/starter.yaml` | Full example config; the small one a new install starts with |
-| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `scan.js` (finding agents), `discover.js` (found on this server), `import.js`, `update.js`, `icons.js`, `editor.js` (config editor API) |
+| `config/services.yaml`, `config/starter.yaml`, `config/widgets.yaml` | Full example config; the small one a new install starts with; example widgets |
+| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `scan.js` (finding agents), `discover.js` (found on this server), `import.js`, `update.js`, `icons.js`, `editor.js` (config editor API), `widgets.js` (values from a service's API), `widget-templates.js` (ready-made widgets) |
 | `public/` | The page: `index.html`, `app.js`, `style.css`, `i18n.js` (translations), `theme.js`, the login page, the config editor, `manifest.webmanifest` and app icons, `icons/` |
 | `test/` | `node --test` suites, with fake servers and `/proc` fixtures |
 | `docs/` | These pages and the screenshots |

@@ -3,6 +3,7 @@ node_modules/
 .env
 .claude/
 config/local.yaml
+config/local-widgets.yaml
 *.bak
 config/icons/
 data/

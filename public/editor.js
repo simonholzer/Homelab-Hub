@@ -25,7 +25,9 @@ const ICONS = {
   palette: 'M12 3a9 9 0 1 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.6-.4-1 0-.8.7-1.4 1.5-1.4H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8zM7.5 11.5h.01M9.5 7.5h.01M14.5 7.5h.01M17 11h.01',
   eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   share: 'M4 13v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6M12 3v12M7 8l5-5 5 5',
-  download: 'M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4M12 3v12M7 10l5 5 5-5'
+  download: 'M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4M12 3v12M7 10l5 5 5-5',
+  chart: 'M4 20V11M10 20V5M16 20v-6M2 20h20',
+  play: 'M7 5l12 7-12 7z'
 };
 
 /**
@@ -33,11 +35,12 @@ const ICONS = {
  * `sections` are the ids of the boxes on it (to open the editor at one of them).
  */
 const PAGES = [
-  { id: 'services', icon: 'cards', label: 'Services', desc: 'The cards on the page, in their groups. Click a service to edit it; drag the handle to move it, also into another group.', sections: [] },
+  { id: 'services', icon: 'cards', label: 'Services', desc: 'The cards on the page, in their groups. Click a service to edit it; drag the handle to move it, also into another group. Widget rows are groups too: move them like the others, and drag widget tiles into and out of them.', sections: [] },
+  { id: 'widgets', icon: 'chart', label: 'Widgets', desc: 'Values from a service\'s own API, shown on its card: photos in Immich, streams in Jellyfin … They are kept in their own file, widgets.yaml, next to the config. A card shows one when you pick it under "Widget" in the card.', sections: ['cfg-widgets'] },
   { id: 'found', icon: 'search', label: 'Found', desc: 'Containers that run in Docker and have no card yet: one click makes a card.', sections: ['cfg-found'] },
   { id: 'machines', icon: 'server', label: 'Machines', desc: 'The stats tiles at the top of the page: this server, and other machines that run the agent.', sections: ['cfg-own', 'cfg-stats', 'cfg-agents-sec'] },
   { id: 'hosts', icon: 'link', label: 'Host shortcuts', desc: 'Short names for addresses, used as {name} in service addresses.', sections: ['cfg-hosts'] },
-  { id: 'settings', icon: 'gear', label: 'Settings', desc: 'How the page looks and how often the hub checks things.', sections: ['cfg-general', 'cfg-timing', 'cfg-home', 'cfg-proxy', 'cfg-docker'] },
+  { id: 'settings', icon: 'gear', label: 'Settings', desc: 'How the page looks and how often the hub checks things.', sections: ['cfg-browser', 'cfg-general', 'cfg-timing', 'cfg-home', 'cfg-proxy', 'cfg-docker'] },
   { id: 'themes', icon: 'palette', label: 'Themes', desc: 'Color themes of your own. Each starts from a built-in theme and changes only the colors you set. After saving, everyone can pick them in the gear menu under Appearance.', sections: ['cfg-themes'] },
   { id: 'backup', icon: 'box', label: 'Import and backup', desc: '', sections: ['cfg-tools'] }
 ];
@@ -110,51 +113,100 @@ async function api(method, url, body) {
 }
 
 // ---- state ----
-let st = null; // {version, base, model, text, file, writable, icons, errors, saved, open, tab, note, busy}
+// Two files are edited: the config (services.yaml) and widgets.yaml. Each is a "doc" of its own (st.docs);
+// st.model, st.text ... are the doc shown now: the Widgets page and the widgets.yaml text show widgets.yaml,
+// everything else the config. Each doc remembers whether its form (model) or its text is the one being edited.
+let st = null; // {docs: {services, widgets}, tab, page, yamlKind, icons, open, note, busy, filter}
 let dlg = null;
 const ui = {};
 let validateTimer = null;
-let validateRun = 0;
-let validated = ''; // the state the hub checked last: the same state is not sent twice
+const validateRuns = {};
+const validated = {}; // per doc: the state the hub checked last, so the same state is not sent twice
+const DOC_KEYS = ['file', 'writable', 'version', 'base', 'text', 'model', 'errors', 'saved'];
+const KINDS = ['widgets', 'services']; // in this order when saving: cards may use a widget that is new
+const q = (kind) => (kind === 'widgets' ? '?file=widgets' : '');
+const fileName = (file) => String(file ?? '').split(/[\\/]/).pop() || 'services.yaml';
 
 /** The model as it is sent: without the empty sections the form created on the way. */
-function clean(model) {
+function clean(model, kind = 'services') {
   if (!model) return model;
   const m = JSON.parse(JSON.stringify(model));
+  if (kind === 'widgets') {
+    for (const w of Object.values(m)) {
+      if (!isObject(w)) continue;
+      if (isObject(w.headers) && Object.keys(w.headers).length === 0) delete w.headers;
+      if (w.path === '') delete w.path;
+    }
+    return m;
+  }
   if (isObject(m.settings?.home) && Object.keys(m.settings.home).length === 0) delete m.settings.home;
   for (const k of ['settings', 'stats', 'hosts', 'themes']) if (isObject(m[k]) && Object.keys(m[k]).length === 0) delete m[k];
   return m;
 }
 
-function adopt(d) {
-  st = {
-    file: st?.file,
-    writable: st?.writable ?? true,
-    icons: st?.icons ?? {},
-    tab: st?.tab ?? 'visual',
-    page: st?.page ?? 'services',
-    filter: st?.filter ?? '',
-    ...Object.fromEntries(Object.entries(d).filter(([k]) => ['file', 'writable', 'icons'].includes(k))),
+function newDoc(d, kind) {
+  return {
+    file: d.file,
+    writable: d.writable ?? true,
     version: d.version,
     base: d.text,
     text: d.text,
     model: d.model,
     errors: d.errors ?? [],
-    saved: { text: d.text, model: JSON.stringify(clean(d.model)) },
+    saved: { text: d.text, model: JSON.stringify(clean(d.model, kind)) },
+    mode: d.model ? 'visual' : 'yaml'
+  };
+}
+
+/** Which file is shown now. */
+function kindNow() {
+  if (!st?.docs.widgets) return 'services';
+  if (st.tab === 'yaml') return st.yamlKind;
+  return st.page === 'widgets' ? 'widgets' : 'services';
+}
+const sm = () => st.docs.services.model ?? {}; // the config's form, whichever page is shown
+const wm = () => st.docs.widgets?.model ?? {}; // widgets.yaml's form
+
+function adopt(d, w) {
+  const s = {
+    icons: d.icons ?? st?.icons ?? {},
+    tab: st?.tab ?? 'visual',
+    page: st?.page ?? 'services',
+    yamlKind: st?.yamlKind ?? 'services',
+    filter: st?.filter ?? '',
+    docs: { services: newDoc(d, 'services'), widgets: w ? newDoc(w, 'widgets') : null },
     open: new WeakSet(),
     note: '',
     busy: false
   };
-  if (!st.model) st.tab = 'yaml';
+  for (const k of DOC_KEYS) {
+    Object.defineProperty(s, k, { get: () => s.docs[kindNow()][k], set: (v) => (s.docs[kindNow()][k] = v), enumerable: true });
+  }
+  st = s;
+  if (!st.docs.services.model) {
+    st.tab = 'yaml';
+    st.yamlKind = 'services';
+  }
+  if (st.tab === 'visual' && st.docs[kindNow()].mode !== 'visual') st.page = 'services';
+  if (st.tab === 'yaml' && st.docs[kindNow()].mode !== 'yaml') st.yamlKind = 'services';
+  for (const k of KINDS) delete validated[k];
 }
 
-function isDirty() {
-  if (!st) return false;
-  if (st.tab === 'yaml') return st.text !== st.saved.text;
-  return st.base !== st.saved.text || JSON.stringify(clean(st.model)) !== st.saved.model;
+function docDirty(kind) {
+  const d = st?.docs[kind];
+  if (!d) return false;
+  if (d.mode === 'yaml') return d.text !== d.saved.text;
+  return d.base !== d.saved.text || JSON.stringify(clean(d.model, kind)) !== d.saved.model;
 }
 
-const source = () => (st.tab === 'yaml' ? { text: st.text } : { base: st.base, model: clean(st.model) });
+const isDirty = () => Boolean(st) && KINDS.some(docDirty);
+
+const sourceOf = (kind) => {
+  const d = st.docs[kind];
+  return d.mode === 'yaml' ? { text: d.text } : { base: d.base, model: clean(d.model, kind) };
+};
+/** What is sent to check a doc: the config is checked against the widgets being edited next to it. */
+const renderBody = (kind) => (kind === 'services' && docDirty('widgets') ? { ...sourceOf('services'), widgets: sourceOf('widgets') } : sourceOf(kind));
 
 function touched() {
   st.note = '';
@@ -163,37 +215,74 @@ function touched() {
   validateTimer = setTimeout(validate, 600);
 }
 
-/** Asks the hub what it thinks of the current state (nothing is saved). */
-async function validate() {
-  const body = JSON.stringify(source());
-  if (body === validated) return;
-  const run = ++validateRun;
+/** Asks the hub what it thinks of one file's current state (nothing is saved). */
+async function validateDoc(kind) {
+  const d = st?.docs[kind];
+  if (!d) return;
+  const body = JSON.stringify(renderBody(kind));
+  if (body === validated[kind]) return;
+  const run = (validateRuns[kind] = (validateRuns[kind] ?? 0) + 1);
   try {
-    const { status, data } = await api('POST', '/api/config/render', body);
-    if (run !== validateRun || !st) return;
-    validated = body;
-    st.errors = status === 200 ? data.errors : [tr(data.error ?? 'The config could not be checked.')];
+    const { status, data } = await api('POST', `/api/config/render${q(kind)}`, body);
+    if (run !== validateRuns[kind] || !st || st.docs[kind] !== d) return;
+    validated[kind] = body;
+    d.errors = status === 200 ? data.errors : [tr(data.error ?? 'The config could not be checked.')];
   } catch {
     return; // connection trouble: saving will say so
   }
   updateStatus();
 }
 
+const validate = () => Promise.all(KINDS.map(validateDoc));
+
+/** The problems of both files; those of widgets.yaml say so. */
+const allErrors = () => KINDS.flatMap((k) => (st.docs[k]?.errors ?? []).map((e) => (k === 'widgets' ? `widgets.yaml: ${e}` : e)));
+
 function updateStatus() {
   const dirty = isDirty();
-  const n = st.errors.length;
+  const errors = allErrors();
+  const n = errors.length;
+  const readOnly = KINDS.some((k) => docDirty(k) && !st.docs[k].writable) || !st.docs.services.writable;
   const parts = [];
   if (st.busy) parts.push(t('Saving…'));
-  else if (!st.writable) parts.push(t('The file is read-only here, so it cannot be saved'));
+  else if (readOnly) parts.push(t('The file is read-only here, so it cannot be saved'));
   else if (n > 0) parts.push(n === 1 ? t('1 problem to fix') : t('{n} problems to fix', { n }));
   else if (st.note) parts.push(tr(st.note));
   else parts.push(dirty ? t('Unsaved changes') : t('No changes'));
   if (n > 0 && dirty && !st.busy) parts.push(t('unsaved changes'));
   ui.status.textContent = parts.join(' · ');
-  ui.status.dataset.state = n > 0 || !st.writable ? 'bad' : st.note && !dirty ? 'ok' : dirty ? 'dirty' : 'idle';
+  ui.status.dataset.state = n > 0 || readOnly ? 'bad' : st.note && !dirty ? 'ok' : dirty ? 'dirty' : 'idle';
   ui.problems.hidden = n === 0;
-  ui.problems.replaceChildren(...st.errors.map((e) => h('li', { text: e })));
-  ui.save.disabled = !dirty || st.busy || !st.writable;
+  ui.problems.replaceChildren(...errors.map((e) => h('li', { text: e })));
+  ui.save.disabled = !dirty || st.busy || readOnly;
+}
+
+/** Makes a doc's form (visual) or text (yaml) the one being edited; the hub converts. False when it can't. */
+async function ensureMode(kind, mode) {
+  const d = st.docs[kind];
+  if (!d) return false;
+  if (d.mode === mode) return true;
+  try {
+    const { status, data } = await api('POST', `/api/config/render${q(kind)}`, renderBody(kind));
+    if (status !== 200) throw new Error(tr(data.error));
+    if (mode === 'visual' && !data.model) {
+      d.errors = data.errors;
+      st.note = '';
+      updateStatus();
+      return false; // syntax error: stay on the text until it is fixed
+    }
+    d.base = data.text;
+    d.text = data.text;
+    d.model = data.model ?? d.model;
+    d.errors = data.errors;
+    d.mode = mode;
+    st.open = new WeakSet();
+    return true;
+  } catch (err) {
+    st.note = err.message;
+    updateStatus();
+    return false;
+  }
 }
 
 // ---- small form parts ----
@@ -272,6 +361,39 @@ function move(arr, i, d, redraw = renderForm) {
 }
 
 // ---- sections ----
+/** Refresh, theme and language of this browser (the page keeps them, see window.hubPrefs in app.js). */
+function browserSection() {
+  const p = window.hubPrefs;
+  if (!p) return null;
+  const now = p.get();
+  const sel = (choices, value, onChange, label) => {
+    const el = h('select', { class: 'cfg-in', 'aria-label': label }, ...choices.map(([v, text]) => h('option', { value: v, rawText: text })));
+    el.value = value;
+    el.addEventListener('change', () => onChange(el.value));
+    return el;
+  };
+  const refresh = h('input', { type: 'number', class: 'cfg-in', min: now.min, max: now.max, step: 1, 'aria-label': 'Refresh every' });
+  refresh.value = now.refreshSeconds;
+  const hint = h('span', { class: 'cfg-h', text: t('The hub measures CPU, memory, network and storage every {stats} s and re-checks services and containers every {checks} s (set below, under Timing).', { stats: now.statsSeconds ?? '?', checks: now.checkSeconds ?? '?' }) });
+  refresh.addEventListener('input', () => {
+    const ok = p.setRefresh(refresh.value);
+    hint.classList.toggle('bad', !ok);
+    if (!ok) hint.textContent = t('Enter a whole number from {min} to {max}.', { min: now.min, max: now.max });
+  });
+  return section(
+    'cfg-browser',
+    'This browser',
+    'How this browser shows the page. Applied at once and kept in this browser only; nothing here is saved to the config.',
+    grid(
+      3,
+      field('Refresh every', withUnit(refresh, 'seconds')),
+      field('Theme', sel(p.themes(), now.theme, (v) => p.setTheme(v), 'Theme')),
+      field('Language', sel(p.languages(), now.lang, (v) => p.setLang(v), 'Language'), 'Automatic: the browser\'s language, or the one set below.')
+    ),
+    hint
+  );
+}
+
 /** The Settings page: one box per topic. */
 function secSettings() {
   const m = st.model;
@@ -297,6 +419,7 @@ function secSettings() {
     if (isObject(d) && Object.keys(d).filter((k) => k !== ID).length === 0) delete m.settings.discovery;
   };
   return [
+    browserSection(),
     section(
       'cfg-general',
       'Page',
@@ -670,7 +793,7 @@ function checkField(svc) {
   );
 }
 
-function svcForm(svc, refreshHead) {
+function svcForm(svc, refreshHead, ctx) {
   const addr = (key, placeholder) => {
     const el = input(() => svc[key], (v) => put(svc, key, v.trim()), { mono: true, placeholder, after: refreshHead });
     el.dataset.addr = '';
@@ -706,7 +829,8 @@ function svcForm(svc, refreshHead) {
         )
       ),
       check('Accept a self-signed certificate on the check', svc.insecure === true, (on) => put(svc, 'insecure', on || undefined))
-    )
+    ),
+    widgetField(svc, ctx, refreshHead)
   );
   // host shortcuts: a click writes {name} into the address field used last
   const hosts = Object.keys(isObject(st.model.hosts) ? st.model.hosts : {});
@@ -740,16 +864,25 @@ function svcItem(svc, i, list, redraw) {
   const name = h('span', { class: 'cfg-svcname' });
   const sub = h('span', { class: 'cfg-svcsub' });
   const tags = h('span', { class: 'cfg-tags' });
+  const tile = isTile(svc);
   const refreshHead = () => {
-    img.src = iconUrl(svc.icon);
+    const wdef = tile ? wm()[widgetUse(svc)] : null;
+    img.src = iconUrl(svc.icon || wdef?.icon);
+    if (tile) {
+      const w = widgetUse(svc);
+      name.textContent = svc.name || wdef?.name || w || t('New widget tile');
+      sub.textContent = w ? t('Widget tile · {name}', { name: w }) : t('Widget tile · no widget yet');
+      tags.replaceChildren(...[svc.hidden === true ? 'hidden' : '', 'tile'].filter(Boolean).map((x) => h('span', { class: `cfg-tag${x === 'tile' ? ' tile' : ''}`, text: x })));
+      return;
+    }
     name.textContent = svc.name || t('Unnamed service');
     sub.textContent = svc.url || svc.local || t('no address yet');
     tags.replaceChildren(
-      ...[svc.hidden === true ? 'hidden' : '', !svc.url && svc.local ? 'home only' : ''].filter(Boolean).map((t) => h('span', { class: 'cfg-tag', text: t }))
+      ...[svc.hidden === true ? 'hidden' : '', !svc.url && svc.local ? 'home only' : '', svc.widget ? 'widget' : ''].filter(Boolean).map((t) => h('span', { class: 'cfg-tag', text: t }))
     );
   };
   refreshHead();
-  const summary = h('button', { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' }, svg('chev', 14), img, h('span', { class: 'cfg-svctext' }, name, sub), tags);
+  const summary = h('button', { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' }, svg('chev', 14), tile && !svc.icon && !wm()[widgetUse(svc)]?.icon ? svg('chart', 26) : img, h('span', { class: 'cfg-svctext' }, name, sub), tags);
   summary.addEventListener('click', () => {
     if (open) st.open.delete(svc);
     else st.open.add(svc);
@@ -784,7 +917,8 @@ function svcItem(svc, i, list, redraw) {
       }, { danger: true })
     )
   );
-  const el = h('div', { class: `cfg-svc${open ? ' open' : ''}` }, head, open ? svcForm(svc, refreshHead) : null);
+  const ctx = { list, i, redraw };
+  const el = h('div', { class: `cfg-svc${open ? ' open' : ''}${tile ? ' cfg-tileitem' : ''}` }, head, open ? (tile ? tileForm(svc, refreshHead, ctx) : svcForm(svc, refreshHead, ctx)) : null);
   el.dropInfo = { kind: 'svc', list: () => list, i };
   return el;
 }
@@ -799,16 +933,19 @@ function matchesFilter(svc) {
 function secGroup(g, gi, groups) {
   if (!isObject(g)) return null;
   const list = Array.isArray(g.services) ? g.services : [];
+  const row = isRow(g);
+  if (row) for (const x of list) if (isObject(x)) rowItems.add(x);
   const filtering = st.filter.trim() !== '';
   const groupHit = filtering && typeof g.name === 'string' && g.name.toLowerCase().includes(st.filter.trim().toLowerCase());
   // changes inside a group draw only this group again
   const redraw = () => document.getElementById(`cfg-group-${gi}`)?.replaceWith(secGroup(g, gi, groups));
-  const count = h('span', { class: 'cfg-used', text: list.length === 1 ? t('1 service') : t('{n} services', { n: list.length }) });
+  const count = h('span', { class: 'cfg-used', text: row ? (list.length === 1 ? t('1 widget') : t('{n} widgets', { n: list.length })) : list.length === 1 ? t('1 service') : t('{n} services', { n: list.length }) });
   const head = h(
     'div',
     { class: 'cfg-grouphead' },
     grip('group', groups, gi),
-    input(() => g.name, (v) => put(g, 'name', v), { big: true, placeholder: 'Group name', label: 'Group name', after: renderNav }),
+    row ? h('span', { class: 'cfg-rowmark', title: t('Widget row') }, svg('chart', 18)) : null,
+    input(() => g.name, (v) => put(g, 'name', v), { big: true, placeholder: row ? 'Widgets' : 'Group name', label: 'Group name', after: renderNav }),
     count,
     h(
       'span',
@@ -833,23 +970,28 @@ function secGroup(g, gi, groups) {
     const forms = ui.main.querySelectorAll(`#cfg-group-${gi} .cfg-svcform`);
     forms[forms.length - 1]?.querySelector('input')?.focus();
   });
+  const ownServices = () => (Array.isArray(g.services) ? g.services : (g.services = []));
+  const addTile = st.docs.widgets ? addTilePicker(ownServices, redraw, row ? 'Add a widget…' : 'Add a widget tile…') : null;
   const items = list.map((svc, i) => {
     const el = svcItem(svc, i, list, redraw);
+    if (el && row) el.dropInfo.onlyTiles = true;
     if (el && filtering && !groupHit && !matchesFilter(svc)) el.hidden = true;
     return el;
   });
   const svcs = h('div', { class: 'cfg-svcs' }, ...items);
-  if (list.length === 0) svcs.append(h('p', { class: 'cfg-empty', text: 'No services in this group yet.' }));
+  if (list.length === 0) svcs.append(h('p', { class: 'cfg-empty', text: row ? 'No widgets in this row yet. Add one, or drag a widget tile here.' : 'No services in this group yet.' }));
   // a service dropped on the group (not on another service) goes to its end; an empty group gets its list then
   const ownList = () => (Array.isArray(g.services) ? g.services : (g.services = []));
-  svcs.dropInfo = { kind: 'svc', list: ownList, i: list.length };
+  svcs.dropInfo = { kind: 'svc', list: ownList, i: list.length, onlyTiles: row };
   const sec = h(
     'section',
-    { class: 'cfg-sec cfg-group', id: `cfg-group-${gi}` },
+    { class: `cfg-sec cfg-group${row ? ' cfg-tilerow' : ''}`, id: `cfg-group-${gi}` },
     head,
-    h('div', { class: 'cfg-groupopts' }, check('Container health badges for every card', g.autoContainers === true, (on) => put(g, 'autoContainers', on || undefined), 'Matches Docker containers by the card name; cards without a container get no badge.')),
+    row
+      ? h('p', { class: 'cfg-h', text: 'A widget row: only widget tiles. Widgets are made and changed on the Widgets page; here they are only added and moved.' })
+      : h('div', { class: 'cfg-groupopts' }, check('Container health badges for every card', g.autoContainers === true, (on) => put(g, 'autoContainers', on || undefined), 'Matches Docker containers by the card name; cards without a container get no badge.')),
     svcs,
-    h('div', { class: 'cfg-add' }, add)
+    h('div', { class: 'cfg-add' }, row ? null : add, addTile)
   );
   if (filtering && !groupHit && !list.some((x) => isObject(x) && matchesFilter(x))) sec.hidden = true;
   sec.dropInfo = { kind: 'group', list: () => groups, i: gi };
@@ -884,6 +1026,7 @@ function dragMove(e) {
   }
   const info = el.dropInfo;
   if (!info || info.kind !== drag.kind) return;
+  if (info.onlyTiles && !isTile(drag.list[drag.i])) return; // only widget tiles go into the widget row
   if (el.classList.contains('cfg-svcs')) {
     drag.target = { list: info.list, at: info.i };
     el.classList.add('cfg-drop-end');
@@ -908,6 +1051,7 @@ function dragEnd(e) {
   let at = d.target.at;
   if (to === d.list && (at === d.i || at === d.i + 1)) return; // dropped where it was
   const [item] = d.list.splice(d.i, 1);
+  if (isTile(item)) item.type = 'widget'; // out of the widget row it must say so
   if (to === d.list && d.i < at) at--;
   to.splice(at, 0, item);
   touched();
@@ -1138,7 +1282,9 @@ function secTools() {
   const restore = textBtn(null, 'Restore from a file…', async () => {
     const file = await pickFile('.yaml,.yml');
     if (!file) return;
-    st.text = file.text;
+    st.yamlKind = 'services';
+    st.docs.services.text = file.text;
+    st.docs.services.mode = 'yaml';
     st.tab = 'yaml'; // shown as text, checked like anything typed there; nothing is saved until "Save"
     render();
     st.note = t('Loaded {name}. Check it, then save.', { name: file.name });
@@ -1158,7 +1304,7 @@ function secTools() {
 function newCount(page) {
   if (page === 'found') return found?.list?.length ?? 0;
   if (page === 'machines') {
-    const inConfig = new Set((Array.isArray(st.model?.stats?.machines) ? st.model.stats.machines : []).filter(isObject).map((m) => String(m.url ?? '').replace(/\/+$/, '')));
+    const inConfig = new Set((Array.isArray(sm().stats?.machines) ? sm().stats.machines : []).filter(isObject).map((m) => String(m.url ?? '').replace(/\/+$/, '')));
     return (agents?.agents ?? []).filter((a) => !a.added && !inConfig.has(a.url)).length;
   }
   return 0;
@@ -1166,7 +1312,8 @@ function newCount(page) {
 
 /** A small grey number beside a tab: how much is on that page. */
 function itemCount(page) {
-  const m = st.model ?? {};
+  const m = sm();
+  if (page === 'widgets') return Object.keys(wm()).length;
   if (page === 'services') return (Array.isArray(m.groups) ? m.groups : []).filter(isObject).reduce((n, g) => n + (Array.isArray(g.services) ? g.services.length : 0), 0);
   if (page === 'machines') return 1 + (Array.isArray(m.stats?.machines) ? m.stats.machines.length : 0);
   if (page === 'hosts') return isObject(m.hosts) ? Object.keys(m.hosts).length : 0;
@@ -1174,8 +1321,14 @@ function itemCount(page) {
   return null;
 }
 
-function goPage(page, sectionId) {
+async function goPage(page, sectionId) {
   if (st.page !== page) {
+    // the Widgets page edits widgets.yaml, the others the config: that file's form must be usable
+    const kind = page === 'widgets' ? 'widgets' : 'services';
+    if (!(await ensureMode(kind, 'visual'))) {
+      st.note = t('{file} has a mistake the form can\'t show. Fix it in the YAML tab first.', { file: kind === 'widgets' ? 'widgets.yaml' : fileName(st.docs.services.file) });
+      return updateStatus();
+    }
     st.page = page;
     renderForm();
     ui.main.scrollTop = 0;
@@ -1184,8 +1337,8 @@ function goPage(page, sectionId) {
 }
 
 function renderNav() {
-  if (!st?.model) return ui.nav.replaceChildren();
-  const tabs = PAGES.map((p) => {
+  if (!st?.docs.services.model) return ui.nav.replaceChildren();
+  const tabs = PAGES.filter((p) => p.id !== 'widgets' || st.docs.widgets).map((p) => {
     const fresh = newCount(p.id);
     const count = itemCount(p.id);
     const b = h(
@@ -1201,7 +1354,7 @@ function renderNav() {
   const out = [h('div', { class: 'cfg-tablist', role: 'tablist', 'aria-label': 'Sections' }, ...tabs)];
   // on the Services page: a jump list of its groups
   if (st.page === 'services') {
-    const groups = Array.isArray(st.model.groups) ? st.model.groups : [];
+    const groups = Array.isArray(sm().groups) ? sm().groups : [];
     const jumps = groups.map((g, gi) => {
       if (!isObject(g)) return null;
       const b = h('button', { type: 'button', class: 'sub', rawText: g.name || t('Unnamed group') });
@@ -1240,11 +1393,22 @@ function servicesBar() {
     el?.scrollIntoView({ block: 'center' });
     el?.querySelector('input')?.focus();
   });
-  return h('div', { class: 'cfg-toolbar' }, search, fold, addGroup);
+  const addRow = st.docs.widgets
+    ? textBtn('chart', 'Add widget row', () => {
+        if (!Array.isArray(m.groups)) m.groups = [];
+        m.groups.unshift({ name: t('Widgets'), type: 'widgets', services: [] });
+        st.filter = '';
+        touched();
+        renderForm();
+        document.getElementById('cfg-group-0')?.scrollIntoView({ block: 'center' });
+      })
+    : null;
+  return h('div', { class: 'cfg-toolbar' }, search, fold, addGroup, addRow);
 }
 
 function renderForm() {
   const m = st.model;
+  ui.file.textContent = st.file ?? ''; // the Widgets page shows widgets.yaml
   const scroll = ui.main.scrollTop;
   const page = PAGES.find((p) => p.id === st.page) ?? PAGES[0];
   st.page = page.id;
@@ -1262,6 +1426,7 @@ function renderForm() {
       el?.scrollIntoView({ block: 'center' });
       el?.querySelector('input')?.focus();
     }, 'wide');
+    rowItems = new WeakSet(); // filled again while the groups are drawn
     const sections = groups.map((g, gi) => secGroup(g, gi, groups));
     const nothing = st.filter.trim() && sections.every((x) => !x || x.hidden) ? h('p', { class: 'cfg-empty', text: 'No service matches.' }) : null;
     body = [servicesBar(), nothing, ...sections, groups.length === 0 ? h('p', { class: 'cfg-empty', text: 'No groups yet. A group is a heading on the page with its cards below it.' }) : null, addGroup];
@@ -1273,6 +1438,7 @@ function renderForm() {
   else if (page.id === 'hosts') body = [secHosts()];
   else if (page.id === 'settings') body = secSettings();
   else if (page.id === 'themes') body = secThemes();
+  else if (page.id === 'widgets') body = secWidgets();
   else body = [secTools()];
   ui.main.replaceChildren(head, ...[body].flat().filter(Boolean));
   ui.main.scrollTop = scroll;
@@ -1414,11 +1580,27 @@ function renderYaml() {
     area.setRangeText('  ', area.selectionStart, area.selectionEnd, 'end');
     area.dispatchEvent(new Event('input'));
   });
-  ui.main.replaceChildren(h('div', { class: 'cfg-yamlbox' }, colors, area));
+  const files = st.docs.widgets
+    ? h(
+        'div',
+        { class: 'cfg-filetabs', role: 'tablist', 'aria-label': 'File' },
+        ...['services', 'widgets'].map((k) => {
+          const b = h('button', { type: 'button', role: 'tab', class: 'cfg-filetab', 'aria-selected': st.yamlKind === k ? 'true' : 'false', rawText: k === 'widgets' ? 'widgets.yaml' : fileName(st.docs.services.file) }, docDirty(k) ? h('span', { class: 'cfg-dot', title: 'Unsaved changes' }) : null);
+          b.addEventListener('click', async () => {
+            if (k === st.yamlKind || !(await ensureMode(k, 'yaml'))) return;
+            st.yamlKind = k;
+            render();
+          });
+          return b;
+        })
+      )
+    : null;
+  ui.main.replaceChildren(...[files, h('div', { class: 'cfg-yamlbox' }, colors, area)].filter(Boolean));
 }
 
 function render() {
   ui.file.textContent = st.file ?? '';
+  if (st.tab === 'visual' && st.page === 'widgets' && st.docs.widgets?.mode !== 'visual') st.page = 'services';
   for (const [tab, b] of Object.entries(ui.tabs)) b.setAttribute('aria-selected', st.tab === tab ? 'true' : 'false');
   ui.body.dataset.tab = st.tab;
   if (st.tab === 'yaml') renderYaml();
@@ -1429,64 +1611,76 @@ function render() {
 /** Visual -> YAML: the hub writes the text; YAML -> Visual: the hub reads it back into the form. */
 async function switchTab(tab) {
   if (!st || st.busy || tab === st.tab) return;
-  try {
-    const { status, data } = await api('POST', '/api/config/render', source());
-    if (status !== 200) throw new Error(data.error);
-    if (tab === 'visual' && !data.model) {
-      st.errors = data.errors;
-      st.note = '';
-      return updateStatus(); // syntax error: stay on the text until it is fixed
-    }
-    st.base = data.text;
-    st.text = data.text;
-    st.model = data.model ?? st.model;
-    st.errors = data.errors;
-    st.open = new WeakSet();
-    st.tab = tab;
-    render();
-  } catch (err) {
-    st.note = err.message;
-    updateStatus();
-  }
+  // the file shown stays the same: the Widgets page <-> widgets.yaml, the other pages <-> the config
+  const kind = tab === 'yaml' ? (st.page === 'widgets' && st.docs.widgets ? 'widgets' : 'services') : st.yamlKind;
+  if (!(await ensureMode(kind, tab))) return;
+  if (tab === 'yaml') st.yamlKind = kind;
+  else if (kind === 'widgets') st.page = 'widgets';
+  else if (st.page === 'widgets') st.page = 'services';
+  st.tab = tab;
+  render();
 }
 
 /** Which services are unfolded, as positions, to unfold the same ones in a freshly loaded model. */
 function openPositions() {
   const out = [];
-  (Array.isArray(st.model?.groups) ? st.model.groups : []).forEach((g, gi) => (Array.isArray(g?.services) ? g.services : []).forEach((s, si) => st.open.has(s) && out.push([gi, si])));
+  (Array.isArray(sm().groups) ? sm().groups : []).forEach((g, gi) => (Array.isArray(g?.services) ? g.services : []).forEach((s, si) => st.open.has(s) && out.push([gi, si])));
   return out;
+}
+
+/** After a save: the doc is what the hub wrote (its form and text), the folded state stays. */
+function refreshDoc(kind, data) {
+  const old = st.docs[kind];
+  const d = newDoc({ ...data, file: old.file, writable: old.writable }, kind);
+  d.mode = old.mode === 'yaml' || !data.model ? 'yaml' : 'visual';
+  st.docs[kind] = d;
+  delete validated[kind];
 }
 
 async function save() {
   if (!st || st.busy || !isDirty()) return;
-  const wasOpen = st.tab === 'visual' ? openPositions() : [];
-  const openThemes = st.tab === 'visual' && isObject(st.model?.themes) ? Object.keys(st.model.themes).filter((k) => st.open.has(st.model.themes[k])) : [];
+  const wasOpen = openPositions();
+  const themes = isObject(sm().themes) ? sm().themes : {};
+  const openThemes = Object.keys(themes).filter((k) => st.open.has(themes[k]));
+  const openWidgets = Object.keys(wm()).filter((k) => st.open.has(wm()[k]));
+  const scroll = ui.main.scrollTop;
   st.busy = true;
   updateStatus();
+  let savedAny = false;
   try {
-    const { status, data } = await api('PUT', '/api/config', { ...source(), version: st.version });
-    if (status === 200) {
-      const scroll = ui.main.scrollTop;
-      adopt(data);
-      for (const [gi, si] of wasOpen) {
-        const svc = st.model?.groups?.[gi]?.services?.[si];
-        if (isObject(svc)) st.open.add(svc);
+    for (const kind of KINDS) {
+      if (!docDirty(kind)) continue;
+      const d = st.docs[kind];
+      const { status, data } = await api('PUT', `/api/config${q(kind)}`, { ...sourceOf(kind), version: d.version });
+      if (status === 200) {
+        refreshDoc(kind, data);
+        savedAny = true;
+        continue;
       }
-      for (const k of openThemes) if (isObject(st.model?.themes?.[k])) st.open.add(st.model.themes[k]);
-      st.note = t('Saved. The hub is using it now.');
-      render();
-      ui.main.scrollTop = scroll;
-      document.dispatchEvent(new CustomEvent('hub:config-saved'));
-      return;
+      st.busy = false;
+      if (status === 409) {
+        if (confirm(`${tr(data.error)}\n\n${t('Load the new version? Your changes here are lost.')}`)) return void load();
+      } else if (status === 422) {
+        d.errors = data.errors;
+      } else {
+        st.note = data.error ?? t('Not saved ({status}).', { status });
+      }
+      if (savedAny) document.dispatchEvent(new CustomEvent('hub:config-saved'));
+      return updateStatus();
     }
+    for (const [gi, si] of wasOpen) {
+      const svc = sm().groups?.[gi]?.services?.[si];
+      if (isObject(svc)) st.open.add(svc);
+    }
+    for (const k of openThemes) if (isObject(sm().themes?.[k])) st.open.add(sm().themes[k]);
+    for (const k of openWidgets) if (isObject(wm()[k])) st.open.add(wm()[k]);
     st.busy = false;
-    if (status === 409) {
-      if (confirm(`${tr(data.error)}\n\n${t('Load the new version? Your changes here are lost.')}`)) return void load();
-    } else if (status === 422) {
-      st.errors = data.errors;
-    } else {
-      st.note = data.error ?? t('Not saved ({status}).', { status });
-    }
+    st.note = t('Saved. The hub is using it now.');
+    render();
+    ui.main.scrollTop = scroll;
+    document.dispatchEvent(new CustomEvent('hub:config-saved'));
+    validate(); // the config's problems may have changed with the widgets
+    return;
   } catch (err) {
     st.busy = false;
     st.note = t('Not saved: {message}', { message: err.message });
@@ -1915,6 +2109,650 @@ function secThemes() {
   ];
 }
 
+// ---- widget tiles: a widget on a tile of its own (type: widget in a group, or any entry of a widget row) ----
+let rowItems = new WeakSet(); // the entries of widget rows (tiles without saying type: widget)
+const isTile = (svc) => isObject(svc) && (svc.type === 'widget' || rowItems.has(svc));
+const isRow = (g) => isObject(g) && g.type === 'widgets';
+let templates = []; // ready-made widgets (src/widget-templates.js), with keySet
+const normWord = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+/** The ready-made widget that fits a card (its icon, name or containers), like templateFor() on the hub. */
+function templateFor(svc) {
+  const texts = [svc?.icon, svc?.name, ...asList(svc?.containers)].map(normWord).filter(Boolean);
+  return templates.find((tpl) => tpl.match.some((w) => texts.some((x) => x.includes(normWord(w))))) ?? null;
+}
+/** Copies a ready-made widget into widgets.yaml (once) and returns its name there. `svc`: the card it is for. */
+function useTemplate(tpl, svc) {
+  const all = wm();
+  if (isObject(all[tpl.id])) return tpl.id;
+  const id = freeWidgetId(tpl.id);
+  all[id] = { name: tpl.name, icon: tpl.icon ?? tpl.id, ...JSON.parse(JSON.stringify(tpl.widget)) };
+  if (svc) giveAddress(id, svc);
+  return id;
+}
+/** What to do after a ready-made widget was taken: its key. */
+function templateNote(tpl) {
+  return tpl.keySet
+    ? t('{name} widget added. {env} is already set on the hub. Save to see it.', { name: tpl.name, env: tpl.env })
+    : t('{name} widget added. Now put {env} into the hub\'s compose.yaml (under environment:). {help}', { name: tpl.name, env: tpl.env, help: t(tpl.help) });
+}
+/** A widget with a path and no address of its own gets the card's: a tile has none to give it. */
+function giveAddress(id, svc) {
+  const w = wm()[id];
+  if (isObject(w) && !w.url && !w.address && (svc.local || svc.url)) w.address = svc.local || svc.url;
+}
+/** A new tile with a card's widget (or `widgetId`). The widget gets the card's address when it has none. */
+function tileFor(svc, widgetId) {
+  const widget = widgetId ?? (isObject(svc.widget) ? unmarked(svc.widget) : svc.widget);
+  giveAddress(typeof widget === 'string' ? widget : widget?.use, svc);
+  return { type: 'widget', widget };
+}
+
+/** A tile only says which widget it shows; heading, icon and address are the widget's (Widgets page). */
+function tileForm(svc, refreshHead, ctx) {
+  return h('div', { class: 'cfg-svcform' }, widgetField(svc, ctx, refreshHead));
+}
+
+/** "Add a widget…": a list of the widgets; picking one adds a tile with it to `list`. */
+function addTilePicker(list, redraw, label = 'Add a widget tile…') {
+  const all = wm();
+  const names = Object.keys(all).filter((k) => isObject(all[k]));
+  const sel = h('select', { class: 'cfg-in cfg-addtile', 'aria-label': label }, h('option', { value: '', text: label }), ...names.map((n) => h('option', { value: n, rawText: all[n].name && all[n].name !== n ? `${all[n].name} (${n})` : n })));
+  if (names.length === 0) {
+    sel.disabled = true;
+    sel.title = t('Make a widget on the Widgets page first.');
+  }
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    list().push({ type: 'widget', widget: sel.value });
+    touched();
+    redraw();
+  });
+  return sel;
+}
+
+// ---- widgets (widgets.yaml) ----
+const WIDGET_ID = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
+const MAX_FIELDS = 6;
+const WIDGET_FORMATS = [
+  ['auto', 'Automatic'],
+  ['number', 'Number'],
+  ['bytes', 'Size (KB, MB, GB …)'],
+  ['percent', 'Percent'],
+  ['duration', 'Duration (from seconds)'],
+  ['text', 'Text']
+];
+/** The widget a card uses: widget: name, or widget: { use: name, ... }. */
+const widgetUse = (svc) => (typeof svc?.widget === 'string' ? svc.widget : isObject(svc?.widget) && typeof svc.widget.use === 'string' ? svc.widget.use : null);
+const allServices = () => [
+  ...(Array.isArray(sm().groups) ? sm().groups : []).flatMap((g) => (isObject(g) && Array.isArray(g.services) ? g.services.filter(isObject) : []))
+];
+/** Every list that holds cards or tiles: the widget row and each group's services. */
+/** Is this entry a tile in a widget row (where it need not say type: widget)? */
+const inRow = (x) => (Array.isArray(sm().groups) ? sm().groups : []).some((g) => isRow(g) && Array.isArray(g.services) && g.services.includes(x));
+const allLists = () => [...(Array.isArray(sm().groups) ? sm().groups : []).map((g) => (isObject(g) && Array.isArray(g.services) ? g.services : []))];
+const widgetUsers = (id) => allServices().filter((svc) => widgetUse(svc) === id);
+/** A copy without the position markers the hub put in (they only mean something in the file they came from). */
+const unmarked = (v) => (Array.isArray(v) ? v.map(unmarked) : isObject(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== ID).map(([k, x]) => [k, unmarked(x)])) : v);
+
+/** The {names} a widget asks the card for: placeholders that are neither {env:...} nor a host shortcut. */
+function widgetParams(w) {
+  const hosts = isObject(sm().hosts) ? sm().hosts : {};
+  const texts = [w?.path, w?.url, w?.body, ...Object.values(isObject(w?.headers) ? w.headers : {})].filter((x) => typeof x === 'string');
+  const out = new Set();
+  for (const text of texts) for (const [, name] of text.matchAll(/\{([A-Za-z0-9_-]+)\}/g)) if (!Object.hasOwn(hosts, name)) out.add(name);
+  return [...out];
+}
+
+function freeWidgetId(wanted) {
+  const all = wm();
+  const base = String(wanted ?? '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|-+$/g, '').slice(0, 34) || 'widget';
+  let id = base;
+  for (let i = 2; Object.hasOwn(all, id); i++) id = `${base}-${i}`;
+  return id;
+}
+
+function renameWidget(old, el) {
+  const next = el.value.trim();
+  if (next === old) return;
+  const problem = !WIDGET_ID.test(next) ? t('Use only letters, digits, - and _ for a widget name.') : Object.hasOwn(wm(), next) ? t('"{name}" already exists.', { name: next }) : '';
+  if (problem) {
+    el.value = old;
+    st.note = problem;
+    return updateStatus();
+  }
+  st.docs.widgets.model = Object.fromEntries(Object.entries(wm()).map(([k, v]) => [k === old ? next : k, v]));
+  // the cards that use it follow the new name
+  if (st.docs.services.mode === 'visual') {
+    for (const svc of widgetUsers(old)) {
+      if (typeof svc.widget === 'string') svc.widget = next;
+      else svc.widget.use = next;
+    }
+  }
+  touched();
+  renderForm();
+}
+
+/** One widget as YAML, to share. Header values that are not {placeholders} are left out: they are usually keys. */
+function widgetYaml(id, w) {
+  const q = (v) => JSON.stringify(String(v));
+  const lines = [`${id}:`];
+  if (w.name) lines.push(`  name: ${q(w.name)}`);
+  if (w.url) lines.push(`  url: ${q(w.url)}`);
+  else if (w.path) lines.push(`  path: ${q(w.path)}`);
+  if (w.method && String(w.method).toUpperCase() !== 'GET') lines.push(`  method: ${String(w.method).toUpperCase()}`);
+  if (w.insecure === true) lines.push('  insecure: true');
+  const headers = Object.entries(isObject(w.headers) ? w.headers : {});
+  if (headers.length) {
+    lines.push('  headers:');
+    for (const [k, v] of headers) lines.push(`    ${k}: ${q(/\{[^}]+\}/.test(String(v)) ? v : '{env:YOUR_API_KEY}')}`);
+  }
+  if (w.body != null && w.body !== '') lines.push(`  body: ${q(typeof w.body === 'string' ? w.body : JSON.stringify(w.body))}`);
+  lines.push('  fields:');
+  for (const f of Array.isArray(w.fields) ? w.fields.filter(isObject) : []) {
+    lines.push(`    - label: ${q(f.label ?? '')}`, `      value: ${q(f.value ?? '')}`);
+    if (f.format && f.format !== 'auto') lines.push(`      format: ${f.format}`);
+    if (f.suffix) lines.push(`      suffix: ${q(f.suffix)}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** The headers of a widget as rows (name, value); the mapping is written again after every change. */
+function headerRows(w) {
+  const rows = Object.entries(isObject(w.headers) ? w.headers : {}).map(([k, v]) => ({ k, v: String(v ?? '') }));
+  const write = () => {
+    const out = {};
+    for (const r of rows) if (r.k.trim()) out[r.k.trim()] = r.v;
+    if (Object.keys(out).length) w.headers = out;
+    else delete w.headers;
+    touched();
+  };
+  const box = h('div', { class: 'cfg-wrows' });
+  const draw = () => {
+    box.replaceChildren(
+      ...rows.map((r, i) => {
+        const name = h('input', { type: 'text', class: 'cfg-in mono', placeholder: 'x-api-key', 'aria-label': 'Header name', spellcheck: 'false', autocomplete: 'off' });
+        name.value = r.k;
+        name.addEventListener('input', () => ((r.k = name.value), write()));
+        const value = h('input', { type: 'text', class: 'cfg-in mono', placeholder: '{env:IMMICH_API_KEY}', 'aria-label': 'Header value', spellcheck: 'false', autocomplete: 'off' });
+        value.value = r.v;
+        value.addEventListener('input', () => ((r.v = value.value), write()));
+        return h('div', { class: 'cfg-wrow hdr' }, name, value, iconBtn('x', 'Remove header', () => (rows.splice(i, 1), write(), draw()), { danger: true }));
+      }),
+      textBtn('plus', 'Add header', () => {
+        rows.push({ k: '', v: '' });
+        draw();
+        box.querySelector('.cfg-wrow:last-of-type input')?.focus();
+      })
+    );
+  };
+  draw();
+  return box;
+}
+
+/** The values a widget shows: label, where it is in the answer, how it is shown. */
+function fieldRows(w, redraw) {
+  if (!Array.isArray(w.fields)) w.fields = [];
+  const list = w.fields;
+  const rows = list.map((f, i) => {
+    if (!isObject(f)) return null;
+    const format = h('select', { class: 'cfg-in', 'aria-label': 'Shown as' }, ...WIDGET_FORMATS.map(([v, label]) => h('option', { value: v, text: label })));
+    format.value = WIDGET_FORMATS.some(([v]) => v === f.format) ? f.format : 'auto';
+    format.addEventListener('change', () => {
+      put(f, 'format', format.value === 'auto' ? undefined : format.value);
+      touched();
+    });
+    const value = input(() => f.value, (v) => put(f, 'value', v.trim()), { mono: true, placeholder: 'photos', label: 'Value in the answer' });
+    value.dataset.wvalue = '';
+    return h(
+      'div',
+      { class: 'cfg-wrow fld' },
+      input(() => f.label, (v) => put(f, 'label', v), { placeholder: 'Photos', label: 'Label' }),
+      value,
+      format,
+      input(() => f.suffix, (v) => put(f, 'suffix', v.trim()), { placeholder: 'unit', label: 'After the value (optional)' }),
+      h(
+        'span',
+        { class: 'cfg-acts' },
+        iconBtn('up', 'Move up', () => move(list, i, -1, redraw), { disabled: i === 0 }),
+        iconBtn('down', 'Move down', () => move(list, i, 1, redraw), { disabled: i === list.length - 1 }),
+        iconBtn('trash', 'Remove value', () => (list.splice(i, 1), touched(), redraw()), { danger: true })
+      )
+    );
+  });
+  const add = textBtn('plus', 'Add value', () => {
+    list.push({ label: '', value: '' });
+    touched();
+    redraw();
+    [...document.querySelectorAll('.cfg-wrow.fld input')].at(-4)?.focus();
+  });
+  add.disabled = list.length >= MAX_FIELDS;
+  return h(
+    'div',
+    { class: 'cfg-wrows' },
+    list.length ? h('div', { class: 'cfg-wrow fld head' }, ...['Label', 'Value in the answer', 'Shown as', 'Unit'].map((x) => h('span', { class: 'cfg-l', text: x })), h('span')) : null,
+    ...rows,
+    add
+  );
+}
+
+/** "Test": asks the API through the hub and shows what came back; a click on a value adds it. */
+function widgetTest(id, w, redraw) {
+  const users = widgetUsers(id);
+  const others = allServices().filter((svc) => !users.includes(svc) && (svc.local || svc.url));
+  const cards = [...(w.address && !w.url ? [{ name: t('Its address for tiles'), local: w.address }] : []), ...users.filter((x) => !isTile(x)), ...others.filter((x) => !isTile(x))];
+  const sel = h('select', { class: 'cfg-in', 'aria-label': 'Card to test with' });
+  cards.forEach((svc, i) => sel.append(h('option', { value: String(i), rawText: `${svc.name || t('Unnamed service')} · ${svc.local || svc.url || ''}` })));
+  if (st.widgetTest?.id === id && Number.isInteger(st.widgetTest.card)) sel.value = String(st.widgetTest.card);
+  const out = h('div', { class: 'cfg-wtest' });
+  const show = (r) => {
+    if (!r) return out.replaceChildren();
+    const parts = [];
+    if (r.url) parts.push(h('div', { class: 'cfg-h' }, h('span', { text: 'Asked:' }), ' ', h('code', { rawText: r.url })));
+    if (!r.ok) {
+      parts.push(h('p', { class: 'cfg-h bad', text: r.error }));
+      return out.replaceChildren(...parts);
+    }
+    parts.push(
+      h(
+        'div',
+        { class: 'cfg-wvals' },
+        ...r.fields.map((f) => h('div', { class: `cfg-wval${f.error ? ' bad' : ''}` }, h('b', { rawText: f.error ? '!' : String(f.value) }), h('span', { rawText: f.label || '' }), f.error ? h('span', { class: 'cfg-h bad', text: f.error }) : null))
+      )
+    );
+    if (r.paths?.length) {
+      const chips = r.paths.map((p) => {
+        const b = h('button', { type: 'button', class: 'cfg-chip mono', title: 'Add as a value on the card' }, h('span', { rawText: p.path }), h('span', { class: 'cfg-chipval', rawText: ` = ${p.value === null ? 'null' : String(p.value)}` }));
+        b.addEventListener('click', () => {
+          if (!Array.isArray(w.fields)) w.fields = [];
+          const empty = w.fields.find((f) => isObject(f) && !f.value);
+          const label = p.path.replace(/^count\((.*)\)$/, '$1').split('.').filter((x) => !/^\d+$/.test(x)).pop() || '';
+          const nice = label.replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
+          if (empty) {
+            empty.value = p.path;
+            if (!empty.label) empty.label = nice;
+          } else if (w.fields.length < MAX_FIELDS) w.fields.push({ label: nice, value: p.path });
+          else {
+            st.note = t('A widget shows at most {n} values.', { n: MAX_FIELDS });
+            return updateStatus();
+          }
+          touched();
+          redraw();
+        });
+        return b;
+      });
+      parts.push(h('div', { class: 'cfg-h', text: 'In the answer (click one to show it on the card):' }), h('div', { class: 'cfg-chips cfg-paths' }, ...chips));
+    }
+    parts.push(h('details', { class: 'cfg-raw' }, h('summary', { text: 'The whole answer' }), h('pre', { rawText: r.answer })));
+    out.replaceChildren(...parts);
+  };
+  if (st.widgetTest?.id === id) show(st.widgetTest.result);
+  const go = textBtn('play', 'Test', async () => {
+    const svc = cards[Number(sel.value)] ?? {};
+    go.disabled = true;
+    out.replaceChildren(h('p', { class: 'cfg-h', text: 'Asking the API…' }));
+    try {
+      const body = { widget: unmarked(clean({ [id]: w }, 'widgets')[id]), service: unmarked({ url: svc.url, local: svc.local, insecure: svc.insecure, widget: svc.widget }) };
+      if (st.docs.services.mode === 'visual' && isObject(sm().hosts)) body.hosts = sm().hosts;
+      const { status, data } = await api('POST', '/api/config/widget-test', body);
+      const result = status === 200 ? data : { ok: false, error: tr(data.error) };
+      st.widgetTest = { id, card: Number(sel.value), result };
+      show(result);
+    } catch (err) {
+      show({ ok: false, error: err.message });
+    }
+    go.disabled = false;
+  }, 'primary');
+  if (cards.length === 0) {
+    return h('p', { class: 'cfg-h', text: w.url ? 'Add a card first, then test the widget here.' : 'Add a card with an address first: the path is asked on the card\'s address.' });
+  }
+  return h('div', { class: 'cfg-wtestbox' }, h('div', { class: 'cfg-iconrow' }, sel, go), out);
+}
+
+function widgetBox(id, w) {
+  const open = st.open.has(w);
+  const users = widgetUsers(id);
+  const title = h('span', { class: 'cfg-svcname', rawText: w.name || id });
+  const sub = h('span', { class: 'cfg-svcsub', rawText: `${id} · ${users.length === 1 ? t('used by 1 card') : t('used by {n} cards', { n: users.length })}` });
+  const summary = h('button', { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' }, svg('chev', 14), w.icon ? h('img', { src: iconUrl(w.icon), alt: '', width: 22, height: 22 }) : svg('chart', 22), h('span', { class: 'cfg-svctext' }, title, sub));
+  const redraw = () => {
+    const next = widgetBox(id, w);
+    el.replaceWith(next);
+    return next;
+  };
+  summary.addEventListener('click', () => {
+    if (open) st.open.delete(w);
+    else st.open.add(w);
+    redraw().querySelector('.cfg-svcsum').focus();
+  });
+  const share = iconBtn('share', t('Copy as YAML (to share it)'), async () => {
+    st.note = (await copyText(widgetYaml(id, w))) ? t('Copied. Keys in headers were replaced by {env:YOUR_API_KEY}. Import adds it to another hub.') : t('Could not copy. Switch to YAML and copy the block from there.');
+    updateStatus();
+  });
+  const duplicate = iconBtn('copy', 'Duplicate', () => {
+    const copy = unmarked(JSON.parse(JSON.stringify(w)));
+    if (copy.name) copy.name = t('{name} copy', { name: copy.name });
+    const nextId = freeWidgetId(`${id}-copy`);
+    st.docs.widgets.model = Object.fromEntries(Object.entries(wm()).flatMap(([k, v]) => (k === id ? [[k, v], [nextId, copy]] : [[k, v]])));
+    st.open.add(copy);
+    touched();
+    renderForm();
+  });
+  const remove = iconBtn('trash', t('Remove widget {name}', { name: w.name || id }), () => {
+    if (users.length > 0 && !confirm(t('{n} cards or tiles use this widget. Remove it from them too? (Tiles that show it are removed.)', { n: users.length }))) return;
+    for (const svc of users) delete svc.widget;
+    for (const list of allLists()) for (let i = list.length - 1; i >= 0; i--) if (users.includes(list[i]) && (isTile(list[i]) || inRow(list[i]))) list.splice(i, 1);
+    delete wm()[id];
+    touched();
+    renderForm();
+  }, { danger: true });
+  const head = h('div', { class: 'cfg-svchead' }, summary, h('span', { class: 'cfg-acts' }, share, duplicate, remove));
+  const el = h('section', { class: `cfg-svc cfg-widget${open ? ' open' : ''}`, 'data-widget': id }, head);
+  if (!open) return el;
+
+  const key = h('input', { type: 'text', class: 'cfg-in mono', 'aria-label': 'Name in the file', spellcheck: 'false', autocomplete: 'off' });
+  key.value = id;
+  key.addEventListener('change', () => renameWidget(id, key));
+  const nameIn = input(() => w.name, (v) => put(w, 'name', v), { placeholder: id, label: 'Name in the editor', after: () => (title.textContent = w.name || id) });
+
+  // where to ask: a path on the card's address, or a full address
+  const full = typeof w.url === 'string';
+  const where = h('select', { class: 'cfg-in', 'aria-label': 'Address' }, h('option', { value: 'path', text: "A path on the card's address" }), h('option', { value: 'url', text: 'A full address' }));
+  where.value = full ? 'url' : 'path';
+  const addr = full
+    ? input(() => w.url, (v) => put(w, 'url', v.trim()), { mono: true, placeholder: 'http://{nas}:2283/api/server/statistics', label: 'Full address' })
+    : input(() => w.path, (v) => put(w, 'path', v.trim()), { mono: true, placeholder: '/api/server/statistics', label: 'Path' });
+  where.addEventListener('change', () => {
+    if (where.value === 'url') {
+      w.url = w.path ? `http://{nas}${w.path.startsWith('/') ? '' : '/'}${w.path}` : '';
+      delete w.path;
+    } else {
+      w.path = typeof w.url === 'string' ? w.url.replace(/^https?:\/\/[^/]*/i, '') : '';
+      delete w.url;
+    }
+    touched();
+    redraw();
+  });
+  const method = h('select', { class: 'cfg-in', 'aria-label': 'Method' }, h('option', { value: 'GET', rawText: 'GET' }), h('option', { value: 'POST', rawText: 'POST' }));
+  method.value = String(w.method ?? 'GET').toUpperCase() === 'POST' ? 'POST' : 'GET';
+  method.addEventListener('change', () => {
+    if (method.value === 'POST') w.method = 'POST';
+    else {
+      delete w.method;
+      delete w.body;
+    }
+    touched();
+    redraw();
+  });
+  let body = null;
+  if (method.value === 'POST') {
+    body = h('textarea', { class: 'cfg-in mono cfg-paste', rows: 3, spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Body', placeholder: '{"query": "..."}' });
+    body.value = w.body == null ? '' : typeof w.body === 'string' ? w.body : JSON.stringify(w.body);
+    body.addEventListener('input', () => (put(w, 'body', body.value), touched()));
+  }
+  el.append(
+    h(
+      'div',
+      { class: 'cfg-svcform' },
+      fieldset(
+        'Widget',
+        grid(2, field('Name', nameIn, 'Also the heading of its tiles.'), field('Name in the file', key, 'Cards use the widget by this name. Letters, digits, - and _.')),
+        grid(2, iconPicker(w, () => {}))
+      ),
+      fieldset(
+        'Request',
+        grid(2, field('Where', where), field(full ? 'Full address' : 'Path', addr, full ? 'Host shortcuts like {nas} work here.' : 'Added to the card\'s home address (or its public one).')),
+        full
+          ? null
+          : field(
+              'Address for tiles',
+              input(() => w.address, (v) => put(w, 'address', v.trim()), { mono: true, placeholder: 'http://{nas}:2283', label: 'Address for tiles' }),
+              'A card asks the path on its own address; a widget tile asks it here (a click on the tile opens it too).'
+            ),
+        grid(2, field('Method', method), check('Accept a self-signed certificate', w.insecure === true, (on) => put(w, 'insecure', on || undefined))),
+        body ? field('Body', body, 'Sent with the POST request. {placeholders} work here too.') : null,
+        h('div', { class: 'cfg-f' }, h('span', { class: 'cfg-l', text: 'Headers' }), headerRows(w), h('span', { class: 'cfg-h', text: 'Most APIs want a key in a header. Write {env:NAME} and set NAME in the hub\'s compose.yaml: then the key is not in the file. {name} asks each card for a value of its own.' }))
+      ),
+      fieldset(
+        'Values on the card',
+        fieldRows(w, redraw),
+        h('span', { class: 'cfg-h', text: 'Value: where it is in the answer. photos, data.total, items.0.name; count(items) for how many, sum(items.*.size) to add up. Test shows what the answer has.' })
+      ),
+      fieldset('Test', widgetTest(id, w, redraw))
+    )
+  );
+  return el;
+}
+
+/** The widgets in a pasted YAML text: several (name: {...}), a widgets: block, or the inside of one. */
+function widgetsIn(model) {
+  const isWidget = (v) => isObject(v) && Array.isArray(v.fields);
+  const map = isObject(model.widgets) ? model.widgets : model;
+  if (isWidget(map)) return [[map.name ?? 'imported', map]];
+  return Object.entries(map).filter(([, v]) => isWidget(v));
+}
+
+async function importWidgets(text) {
+  const { status, data } = await api('POST', '/api/config/render?file=widgets', { text });
+  if (status !== 200) throw new Error(tr(data.error ?? 'The text could not be read.'));
+  if (!isObject(data.model)) throw new Error(data.errors?.[0] ?? t('No widget found in the text.'));
+  const found = widgetsIn(data.model);
+  if (found.length === 0) throw new Error(t('No widget found in the text.'));
+  for (const [wanted, w] of found) {
+    const copy = unmarked(w);
+    st.docs.widgets.model[freeWidgetId(wanted)] = copy;
+    st.open.add(copy);
+  }
+  return found.length;
+}
+
+function widgetImportBox() {
+  const area = h('textarea', { class: 'cfg-in mono cfg-paste', rows: 8, spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Widget to import', placeholder: 'immich:\n  path: /api/server/statistics\n  headers:\n    x-api-key: "{env:IMMICH_API_KEY}"\n  fields:\n    - label: Photos\n      value: photos' });
+  area.value = st.widgetImport?.text ?? '';
+  area.addEventListener('input', () => (st.widgetImport.text = area.value));
+  const done = (n) => {
+    st.widgetImport = null;
+    st.note = n === 1 ? t('1 widget imported. Check it, then save.') : t('{n} widgets imported. Check them, then save.', { n });
+    touched();
+    renderForm();
+  };
+  const fail = (err) => {
+    st.note = err.message;
+    updateStatus();
+  };
+  return section(
+    'cfg-widgetimport',
+    'Import widgets',
+    'Paste a widget someone shared: the YAML that "Copy as YAML" gives, or several of them. Widgets with a name you already use get a number added.',
+    area,
+    h(
+      'div',
+      { class: 'cfg-tools' },
+      textBtn('plus', 'Import', () => importWidgets(area.value).then(done, fail), 'primary'),
+      textBtn(null, 'From a file…', async () => {
+        const f = await pickFile('.yaml,.yml,.txt');
+        if (f) importWidgets(f.text).then(done, fail);
+      }),
+      textBtn(null, 'Cancel', () => {
+        st.widgetImport = null;
+        renderForm();
+      })
+    )
+  );
+}
+
+function addWidget(wanted = 'my-widget', name = '') {
+  const id = freeWidgetId(wanted);
+  const w = { ...(name ? { name } : {}), path: '', fields: [{ label: '', value: '' }] };
+  st.docs.widgets.model[id] = w;
+  st.open.add(w);
+  touched();
+  return id;
+}
+
+function secWidgets() {
+  const list = Object.entries(wm()).filter(([, w]) => isObject(w));
+  const boxes = list.map(([id, w]) => widgetBox(id, w));
+  const add = () => {
+    addWidget();
+    renderForm();
+    const last = [...ui.main.querySelectorAll('.cfg-widget')].pop();
+    last?.scrollIntoView({ block: 'center' });
+    last?.querySelector('.cfg-svcform input')?.focus();
+  };
+  const anyOpen = list.some(([, w]) => st.open.has(w));
+  const bar = h(
+    'div',
+    { class: 'cfg-toolbar' },
+    textBtn('download', 'Import widgets…', () => {
+      st.widgetImport = st.widgetImport ? null : { text: '' };
+      renderForm();
+      ui.main.querySelector('.cfg-paste')?.focus();
+    }),
+    list.length > 1
+      ? textBtn('fold', anyOpen ? 'Close all' : 'Open all', () => {
+          for (const [, w] of list) {
+            if (anyOpen) st.open.delete(w);
+            else st.open.add(w);
+          }
+          renderForm();
+        })
+      : null,
+    textBtn('plus', 'Add widget', add)
+  );
+  return [
+    bar,
+    st.widgetImport ? widgetImportBox() : null,
+    widgetSuggestions(),
+    h('div', { class: 'cfg-svcs' }, ...boxes),
+    boxes.length === 0 ? h('p', { class: 'cfg-empty', text: 'No widgets yet. Add one, or import one someone shared. Then pick it in a card under "Widget".' }) : null,
+    h('div', { id: 'cfg-widgets', class: 'cfg-add' }, textBtn('plus', 'Add widget', add, 'wide'))
+  ];
+}
+
+/** On the Widgets page: cards a ready-made widget fits, and every ready-made widget to add. */
+function widgetSuggestions() {
+  if (templates.length === 0) return null;
+  const fits = [];
+  for (const list of allLists()) {
+    list.forEach((svc, i) => {
+      if (!isObject(svc) || isTile(svc) || inRow(svc) || widgetUse(svc)) return;
+      const tpl = templateFor(svc);
+      if (!tpl) return;
+      // already shown on a tile somewhere (the widget row or a group): nothing to suggest
+      const shown = allServices().some((x) => (x.type === 'widget' || inRow(x)) && widgetUse(x) === tpl.id);
+      if (!shown) fits.push({ svc, tpl, list, i });
+    });
+  }
+  const rows = fits.map(({ svc, tpl, list }) => {
+    const done = () => {
+      touched();
+      st.note = templateNote(tpl);
+      renderForm();
+    };
+    return h(
+      'div',
+      { class: 'cfg-sugrow' },
+      h('img', { src: iconUrl(svc.icon), alt: '', width: 22, height: 22 }),
+      h('span', { class: 'cfg-svctext' }, h('span', { class: 'cfg-svcname', rawText: svc.name || '' }), h('span', { class: 'cfg-svcsub', rawText: `${tpl.name} · ${tpl.keySet ? t('{env} is set', { env: tpl.env }) : t('needs {env}', { env: tpl.env })}` })),
+      h(
+        'span',
+        { class: 'cfg-tools' },
+        textBtn('plus', 'On the card', () => {
+          svc.widget = useTemplate(tpl, svc);
+          done();
+        }),
+        textBtn('chart', 'As its own tile', () => {
+          const made = tileFor(svc, useTemplate(tpl, svc));
+          list.splice(list.indexOf(svc) + 1, 0, made);
+          done();
+        })
+      )
+    );
+  });
+  const pick = h('select', { class: 'cfg-in', 'aria-label': 'Ready-made widget' }, h('option', { value: '', text: 'A ready-made widget…' }), ...templates.map((tpl) => h('option', { value: tpl.id, rawText: tpl.name })));
+  pick.addEventListener('change', () => {
+    const tpl = templates.find((x) => x.id === pick.value);
+    if (!tpl) return;
+    const id = useTemplate(tpl);
+    st.open.add(wm()[id]);
+    touched();
+    st.note = templateNote(tpl);
+    renderForm();
+    updateStatus();
+  });
+  return section(
+    'cfg-widgetsuggest',
+    'Ready-made widgets',
+    fits.length ? 'These cards are services the hub knows a widget for. One click adds it; then only the API key is missing.' : 'Widgets for well-known services, ready to use: pick one, then give it its API key.',
+    ...rows,
+    h('div', { class: 'cfg-iconrow' }, pick)
+  );
+}
+
+/** In a card's (or tile's) form: which widget it shows, and the values of its own that widget asks for. */
+function widgetField(svc, ctx, refreshHead = () => {}) {
+  if (!st.docs.widgets) return null;
+  const tile = isTile(svc);
+  const all = wm();
+  const names = Object.keys(all).filter((k) => isObject(all[k]));
+  const current = widgetUse(svc) ?? '';
+  const sel = h('select', { class: 'cfg-in', 'aria-label': 'Widget' }, h('option', { value: '', text: tile ? 'Pick a widget' : 'No widget' }), ...names.map((n) => h('option', { value: n, rawText: all[n].name && all[n].name !== n ? `${all[n].name} (${n})` : n })));
+  if (current && !names.includes(current)) sel.append(h('option', { value: current, rawText: t('{name} (not in widgets.yaml)', { name: current }) }));
+  sel.value = current;
+  const redraw = () => {
+    box.replaceWith(widgetField(svc, ctx, refreshHead));
+    refreshHead();
+  };
+  sel.addEventListener('change', () => {
+    if (!sel.value) delete svc.widget;
+    else if (isObject(svc.widget)) svc.widget.use = sel.value;
+    else svc.widget = sel.value;
+    touched();
+    redraw();
+  });
+  // a card's widget can move to a tile of its own, right after the card
+  const ownTile =
+    current && !tile && ctx
+      ? textBtn('chart', 'Move to its own tile', () => {
+          const made = tileFor(svc);
+          delete svc.widget;
+          ctx.list.splice(ctx.i + 1, 0, made);
+          st.open.add(made);
+          touched();
+          ctx.redraw();
+        })
+      : null;
+  const def = current ? all[current] : null;
+  const params = def ? widgetParams(def) : [];
+  const paramInputs = params.map((p) =>
+    field(
+      `{${p}}`,
+      input(
+        () => (isObject(svc.widget) ? svc.widget[p] : ''),
+        (v) => {
+          const obj = isObject(svc.widget) ? svc.widget : { use: current };
+          put(obj, p, v);
+          svc.widget = Object.keys(obj).filter((k) => k !== ID).length > 1 ? obj : current; // only "use" left: the short form
+        },
+        { mono: true, label: p }
+      )
+    )
+  );
+  const box = fieldset(
+    'Widget',
+    h(
+      'div',
+      { class: 'cfg-f' },
+      h('span', { class: 'cfg-l', text: 'Values from its API' }),
+      h('div', { class: 'cfg-iconrow cfg-wrap' }, sel, ownTile),
+      h('span', { class: 'cfg-h', text: tile ? 'The tile shows this widget: its heading, icon and address are set on the Widgets page.' : 'Shows a few values from the service\'s own API on the card, e.g. how many photos Immich keeps. Widgets are made and changed on the Widgets page.' })
+    ),
+    paramInputs.length ? grid(2, ...paramInputs) : null,
+    paramInputs.length ? h('span', { class: 'cfg-h', text: 'This widget asks each card for these values.' }) : null
+  );
+  return box;
+}
+
 function build() {
   if (dlg) return;
   ui.file = h('p', { class: 'cfg-file' });
@@ -1960,14 +2798,23 @@ function build() {
 /** Scrolls to a section, a group or one service (which is unfolded). */
 function showTarget(target) {
   if (!target || !st?.model || st.tab !== 'visual') return;
-  const page = target.group != null ? 'services' : pageOf(target.section);
+  const page = target.widget != null ? 'widgets' : target.group != null ? 'services' : pageOf(target.section);
   if (page && page !== st.page) {
     st.page = page;
     st.filter = '';
     renderForm();
   }
   let el = target.section ? document.getElementById(target.section) : null;
-  const groups = Array.isArray(st.model.groups) ? st.model.groups : [];
+  if (target.widget != null && st.docs.widgets && isObject(wm()[target.widget])) {
+    st.open.add(wm()[target.widget]);
+    if (st.page !== 'widgets') {
+      st.page = 'widgets';
+      st.filter = '';
+    }
+    renderForm();
+    el = [...document.querySelectorAll('.cfg-widget')].find((x) => x.dataset.widget === target.widget) ?? el;
+  }
+  const groups = Array.isArray(sm().groups) ? sm().groups : [];
   const gi = target.group == null ? -1 : groups.findIndex((g) => isObject(g) && g.name === target.group);
   if (gi >= 0) {
     const list = Array.isArray(groups[gi].services) ? groups[gi].services : [];
@@ -1993,9 +2840,10 @@ async function load(target) {
   ui.main.replaceChildren(h('p', { class: 'cfg-msg', text: 'Loading…' }));
   if (!dlg.open) dlg.showModal();
   try {
-    const { status, data } = await api('GET', '/api/config');
+    const [{ status, data }, widgets] = await Promise.all([api('GET', '/api/config'), api('GET', '/api/config?file=widgets').catch(() => null)]);
     if (status !== 200) throw new Error(tr(data.error) ?? t('The hub answered with an error ({status}).', { status }));
-    adopt(data);
+    adopt(data, widgets?.status === 200 ? widgets.data : null);
+    templates = (await api('GET', '/api/config/widget-templates').catch(() => null))?.data?.templates ?? [];
     st.filter = '';
     found = null;
     agents = null;

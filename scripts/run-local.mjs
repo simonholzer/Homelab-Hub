@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = path.join(root, 'config', 'services.yaml');
 const local = path.join(root, 'config', 'local.yaml');
+const localWidgets = path.join(root, 'config', 'local-widgets.yaml');
 
 if (!fs.existsSync(local)) {
   // the server config reads free space from mounted pools; on a laptop use the drive the project is on
@@ -25,11 +26,12 @@ if (!fs.existsSync(local)) {
   fs.writeFileSync(local, text);
   console.log(`[local] created ${local} (edit it freely; delete it to start over from services.yaml)`);
 }
+// the widgets of the preview: kept apart from config/widgets.yaml (the example), made by the editor when saved
 
 const child = spawn(process.execPath, ['src/server.js'], {
   cwd: root,
   stdio: 'inherit',
-  env: { ...process.env, PORT: process.argv[2] ?? process.env.PORT ?? '1212', HOST: process.env.HOST ?? '::', CONFIG_PATH: local, DEFAULT_CONFIG_PATH: source }
+  env: { ...process.env, PORT: process.argv[2] ?? process.env.PORT ?? '1212', HOST: process.env.HOST ?? '::', CONFIG_PATH: local, DEFAULT_CONFIG_PATH: source, WIDGETS_PATH: process.env.WIDGETS_PATH ?? localWidgets }
 });
 child.on('exit', (code) => process.exit(code ?? 0));
 process.on('SIGINT', () => child.kill());

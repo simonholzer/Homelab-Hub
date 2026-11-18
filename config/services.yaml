@@ -116,6 +116,7 @@ groups:
         url: https://photos.example.com
         check: http://{nas}:2283
         local: http://{nas}:2283
+        # widget: immich             # values from Immich's API on the card (widgets.yaml, see docs/widgets.md)
 
       - name: Jellyfin
         icon: jellyfin
