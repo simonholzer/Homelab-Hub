@@ -2,6 +2,18 @@
 
 Every released version, newest first. The Docker image of a version is `ghcr.io/simonholzer/homelab-hub:<version>`.
 
+## Unreleased
+
+- **Widgets.** A card can show a few values from the service's own API: photos in Immich, streams in Jellyfin,
+  containers in Portainer … Widgets are kept in their own file, `widgets.yaml` next to the config, so the config stays
+  readable. Make them in the editor on the new *Widgets* page (with a *Test* that shows what the API answers; a click
+  on a value puts it on the card), or write them by hand. A card picks one under *Widget*. API keys come from the hub's
+  environment (`{env:NAME}`) and never reach the page. Widgets can be copied as YAML and imported, to share them.
+  The YAML tab of the editor has a tab per file. See [docs/widgets.md](docs/widgets.md).
+- Gear menu: *Widget values* hides the values on the cards in this browser.
+
+Updating needs no changes.
+
 ## 1.6.0
 
 - **Themes fold up.** In the editor each theme is a box that opens and closes; closed, it shows its colors as dots.

@@ -25,7 +25,9 @@ const ICONS = {
   palette: 'M12 3a9 9 0 1 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.6-.4-1 0-.8.7-1.4 1.5-1.4H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8zM7.5 11.5h.01M9.5 7.5h.01M14.5 7.5h.01M17 11h.01',
   eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   share: 'M4 13v6a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-6M12 3v12M7 8l5-5 5 5',
-  download: 'M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4M12 3v12M7 10l5 5 5-5'
+  download: 'M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4M12 3v12M7 10l5 5 5-5',
+  chart: 'M4 20V11M10 20V5M16 20v-6M2 20h20',
+  play: 'M7 5l12 7-12 7z'
 };
 
 /**
@@ -34,6 +36,7 @@ const ICONS = {
  */
 const PAGES = [
   { id: 'services', icon: 'cards', label: 'Services', desc: 'The cards on the page, in their groups. Click a service to edit it; drag the handle to move it, also into another group.', sections: [] },
+  { id: 'widgets', icon: 'chart', label: 'Widgets', desc: 'Values from a service\'s own API, shown on its card: photos in Immich, streams in Jellyfin … They are kept in their own file, widgets.yaml, next to the config. A card shows one when you pick it under "Widget" in the card.', sections: ['cfg-widgets'] },
   { id: 'found', icon: 'search', label: 'Found', desc: 'Containers that run in Docker and have no card yet: one click makes a card.', sections: ['cfg-found'] },
   { id: 'machines', icon: 'server', label: 'Machines', desc: 'The stats tiles at the top of the page: this server, and other machines that run the agent.', sections: ['cfg-own', 'cfg-stats', 'cfg-agents-sec'] },
   { id: 'hosts', icon: 'link', label: 'Host shortcuts', desc: 'Short names for addresses, used as {name} in service addresses.', sections: ['cfg-hosts'] },
@@ -110,51 +113,100 @@ async function api(method, url, body) {
 }
 
 // ---- state ----
-let st = null; // {version, base, model, text, file, writable, icons, errors, saved, open, tab, note, busy}
+// Two files are edited: the config (services.yaml) and widgets.yaml. Each is a "doc" of its own (st.docs);
+// st.model, st.text ... are the doc shown now: the Widgets page and the widgets.yaml text show widgets.yaml,
+// everything else the config. Each doc remembers whether its form (model) or its text is the one being edited.
+let st = null; // {docs: {services, widgets}, tab, page, yamlKind, icons, open, note, busy, filter}
 let dlg = null;
 const ui = {};
 let validateTimer = null;
-let validateRun = 0;
-let validated = ''; // the state the hub checked last: the same state is not sent twice
+const validateRuns = {};
+const validated = {}; // per doc: the state the hub checked last, so the same state is not sent twice
+const DOC_KEYS = ['file', 'writable', 'version', 'base', 'text', 'model', 'errors', 'saved'];
+const KINDS = ['widgets', 'services']; // in this order when saving: cards may use a widget that is new
+const q = (kind) => (kind === 'widgets' ? '?file=widgets' : '');
+const fileName = (file) => String(file ?? '').split(/[\\/]/).pop() || 'services.yaml';
 
 /** The model as it is sent: without the empty sections the form created on the way. */
-function clean(model) {
+function clean(model, kind = 'services') {
   if (!model) return model;
   const m = JSON.parse(JSON.stringify(model));
+  if (kind === 'widgets') {
+    for (const w of Object.values(m)) {
+      if (!isObject(w)) continue;
+      if (isObject(w.headers) && Object.keys(w.headers).length === 0) delete w.headers;
+      if (w.path === '') delete w.path;
+    }
+    return m;
+  }
   if (isObject(m.settings?.home) && Object.keys(m.settings.home).length === 0) delete m.settings.home;
   for (const k of ['settings', 'stats', 'hosts', 'themes']) if (isObject(m[k]) && Object.keys(m[k]).length === 0) delete m[k];
   return m;
 }
 
-function adopt(d) {
-  st = {
-    file: st?.file,
-    writable: st?.writable ?? true,
-    icons: st?.icons ?? {},
-    tab: st?.tab ?? 'visual',
-    page: st?.page ?? 'services',
-    filter: st?.filter ?? '',
-    ...Object.fromEntries(Object.entries(d).filter(([k]) => ['file', 'writable', 'icons'].includes(k))),
+function newDoc(d, kind) {
+  return {
+    file: d.file,
+    writable: d.writable ?? true,
     version: d.version,
     base: d.text,
     text: d.text,
     model: d.model,
     errors: d.errors ?? [],
-    saved: { text: d.text, model: JSON.stringify(clean(d.model)) },
+    saved: { text: d.text, model: JSON.stringify(clean(d.model, kind)) },
+    mode: d.model ? 'visual' : 'yaml'
+  };
+}
+
+/** Which file is shown now. */
+function kindNow() {
+  if (!st?.docs.widgets) return 'services';
+  if (st.tab === 'yaml') return st.yamlKind;
+  return st.page === 'widgets' ? 'widgets' : 'services';
+}
+const sm = () => st.docs.services.model ?? {}; // the config's form, whichever page is shown
+const wm = () => st.docs.widgets?.model ?? {}; // widgets.yaml's form
+
+function adopt(d, w) {
+  const s = {
+    icons: d.icons ?? st?.icons ?? {},
+    tab: st?.tab ?? 'visual',
+    page: st?.page ?? 'services',
+    yamlKind: st?.yamlKind ?? 'services',
+    filter: st?.filter ?? '',
+    docs: { services: newDoc(d, 'services'), widgets: w ? newDoc(w, 'widgets') : null },
     open: new WeakSet(),
     note: '',
     busy: false
   };
-  if (!st.model) st.tab = 'yaml';
+  for (const k of DOC_KEYS) {
+    Object.defineProperty(s, k, { get: () => s.docs[kindNow()][k], set: (v) => (s.docs[kindNow()][k] = v), enumerable: true });
+  }
+  st = s;
+  if (!st.docs.services.model) {
+    st.tab = 'yaml';
+    st.yamlKind = 'services';
+  }
+  if (st.tab === 'visual' && st.docs[kindNow()].mode !== 'visual') st.page = 'services';
+  if (st.tab === 'yaml' && st.docs[kindNow()].mode !== 'yaml') st.yamlKind = 'services';
+  for (const k of KINDS) delete validated[k];
 }
 
-function isDirty() {
-  if (!st) return false;
-  if (st.tab === 'yaml') return st.text !== st.saved.text;
-  return st.base !== st.saved.text || JSON.stringify(clean(st.model)) !== st.saved.model;
+function docDirty(kind) {
+  const d = st?.docs[kind];
+  if (!d) return false;
+  if (d.mode === 'yaml') return d.text !== d.saved.text;
+  return d.base !== d.saved.text || JSON.stringify(clean(d.model, kind)) !== d.saved.model;
 }
 
-const source = () => (st.tab === 'yaml' ? { text: st.text } : { base: st.base, model: clean(st.model) });
+const isDirty = () => Boolean(st) && KINDS.some(docDirty);
+
+const sourceOf = (kind) => {
+  const d = st.docs[kind];
+  return d.mode === 'yaml' ? { text: d.text } : { base: d.base, model: clean(d.model, kind) };
+};
+/** What is sent to check a doc: the config is checked against the widgets being edited next to it. */
+const renderBody = (kind) => (kind === 'services' && docDirty('widgets') ? { ...sourceOf('services'), widgets: sourceOf('widgets') } : sourceOf(kind));
 
 function touched() {
   st.note = '';
@@ -163,37 +215,74 @@ function touched() {
   validateTimer = setTimeout(validate, 600);
 }
 
-/** Asks the hub what it thinks of the current state (nothing is saved). */
-async function validate() {
-  const body = JSON.stringify(source());
-  if (body === validated) return;
-  const run = ++validateRun;
+/** Asks the hub what it thinks of one file's current state (nothing is saved). */
+async function validateDoc(kind) {
+  const d = st?.docs[kind];
+  if (!d) return;
+  const body = JSON.stringify(renderBody(kind));
+  if (body === validated[kind]) return;
+  const run = (validateRuns[kind] = (validateRuns[kind] ?? 0) + 1);
   try {
-    const { status, data } = await api('POST', '/api/config/render', body);
-    if (run !== validateRun || !st) return;
-    validated = body;
-    st.errors = status === 200 ? data.errors : [tr(data.error ?? 'The config could not be checked.')];
+    const { status, data } = await api('POST', `/api/config/render${q(kind)}`, body);
+    if (run !== validateRuns[kind] || !st || st.docs[kind] !== d) return;
+    validated[kind] = body;
+    d.errors = status === 200 ? data.errors : [tr(data.error ?? 'The config could not be checked.')];
   } catch {
     return; // connection trouble: saving will say so
   }
   updateStatus();
 }
 
+const validate = () => Promise.all(KINDS.map(validateDoc));
+
+/** The problems of both files; those of widgets.yaml say so. */
+const allErrors = () => KINDS.flatMap((k) => (st.docs[k]?.errors ?? []).map((e) => (k === 'widgets' ? `widgets.yaml: ${e}` : e)));
+
 function updateStatus() {
   const dirty = isDirty();
-  const n = st.errors.length;
+  const errors = allErrors();
+  const n = errors.length;
+  const readOnly = KINDS.some((k) => docDirty(k) && !st.docs[k].writable) || !st.docs.services.writable;
   const parts = [];
   if (st.busy) parts.push(t('Saving…'));
-  else if (!st.writable) parts.push(t('The file is read-only here, so it cannot be saved'));
+  else if (readOnly) parts.push(t('The file is read-only here, so it cannot be saved'));
   else if (n > 0) parts.push(n === 1 ? t('1 problem to fix') : t('{n} problems to fix', { n }));
   else if (st.note) parts.push(tr(st.note));
   else parts.push(dirty ? t('Unsaved changes') : t('No changes'));
   if (n > 0 && dirty && !st.busy) parts.push(t('unsaved changes'));
   ui.status.textContent = parts.join(' · ');
-  ui.status.dataset.state = n > 0 || !st.writable ? 'bad' : st.note && !dirty ? 'ok' : dirty ? 'dirty' : 'idle';
+  ui.status.dataset.state = n > 0 || readOnly ? 'bad' : st.note && !dirty ? 'ok' : dirty ? 'dirty' : 'idle';
   ui.problems.hidden = n === 0;
-  ui.problems.replaceChildren(...st.errors.map((e) => h('li', { text: e })));
-  ui.save.disabled = !dirty || st.busy || !st.writable;
+  ui.problems.replaceChildren(...errors.map((e) => h('li', { text: e })));
+  ui.save.disabled = !dirty || st.busy || readOnly;
+}
+
+/** Makes a doc's form (visual) or text (yaml) the one being edited; the hub converts. False when it can't. */
+async function ensureMode(kind, mode) {
+  const d = st.docs[kind];
+  if (!d) return false;
+  if (d.mode === mode) return true;
+  try {
+    const { status, data } = await api('POST', `/api/config/render${q(kind)}`, renderBody(kind));
+    if (status !== 200) throw new Error(tr(data.error));
+    if (mode === 'visual' && !data.model) {
+      d.errors = data.errors;
+      st.note = '';
+      updateStatus();
+      return false; // syntax error: stay on the text until it is fixed
+    }
+    d.base = data.text;
+    d.text = data.text;
+    d.model = data.model ?? d.model;
+    d.errors = data.errors;
+    d.mode = mode;
+    st.open = new WeakSet();
+    return true;
+  } catch (err) {
+    st.note = err.message;
+    updateStatus();
+    return false;
+  }
 }
 
 // ---- small form parts ----
@@ -706,7 +795,8 @@ function svcForm(svc, refreshHead) {
         )
       ),
       check('Accept a self-signed certificate on the check', svc.insecure === true, (on) => put(svc, 'insecure', on || undefined))
-    )
+    ),
+    widgetField(svc)
   );
   // host shortcuts: a click writes {name} into the address field used last
   const hosts = Object.keys(isObject(st.model.hosts) ? st.model.hosts : {});
@@ -1138,7 +1228,9 @@ function secTools() {
   const restore = textBtn(null, 'Restore from a file…', async () => {
     const file = await pickFile('.yaml,.yml');
     if (!file) return;
-    st.text = file.text;
+    st.yamlKind = 'services';
+    st.docs.services.text = file.text;
+    st.docs.services.mode = 'yaml';
     st.tab = 'yaml'; // shown as text, checked like anything typed there; nothing is saved until "Save"
     render();
     st.note = t('Loaded {name}. Check it, then save.', { name: file.name });
@@ -1158,7 +1250,7 @@ function secTools() {
 function newCount(page) {
   if (page === 'found') return found?.list?.length ?? 0;
   if (page === 'machines') {
-    const inConfig = new Set((Array.isArray(st.model?.stats?.machines) ? st.model.stats.machines : []).filter(isObject).map((m) => String(m.url ?? '').replace(/\/+$/, '')));
+    const inConfig = new Set((Array.isArray(sm().stats?.machines) ? sm().stats.machines : []).filter(isObject).map((m) => String(m.url ?? '').replace(/\/+$/, '')));
     return (agents?.agents ?? []).filter((a) => !a.added && !inConfig.has(a.url)).length;
   }
   return 0;
@@ -1166,7 +1258,8 @@ function newCount(page) {
 
 /** A small grey number beside a tab: how much is on that page. */
 function itemCount(page) {
-  const m = st.model ?? {};
+  const m = sm();
+  if (page === 'widgets') return Object.keys(wm()).length;
   if (page === 'services') return (Array.isArray(m.groups) ? m.groups : []).filter(isObject).reduce((n, g) => n + (Array.isArray(g.services) ? g.services.length : 0), 0);
   if (page === 'machines') return 1 + (Array.isArray(m.stats?.machines) ? m.stats.machines.length : 0);
   if (page === 'hosts') return isObject(m.hosts) ? Object.keys(m.hosts).length : 0;
@@ -1174,8 +1267,14 @@ function itemCount(page) {
   return null;
 }
 
-function goPage(page, sectionId) {
+async function goPage(page, sectionId) {
   if (st.page !== page) {
+    // the Widgets page edits widgets.yaml, the others the config: that file's form must be usable
+    const kind = page === 'widgets' ? 'widgets' : 'services';
+    if (!(await ensureMode(kind, 'visual'))) {
+      st.note = t('{file} has a mistake the form can\'t show. Fix it in the YAML tab first.', { file: kind === 'widgets' ? 'widgets.yaml' : fileName(st.docs.services.file) });
+      return updateStatus();
+    }
     st.page = page;
     renderForm();
     ui.main.scrollTop = 0;
@@ -1184,8 +1283,8 @@ function goPage(page, sectionId) {
 }
 
 function renderNav() {
-  if (!st?.model) return ui.nav.replaceChildren();
-  const tabs = PAGES.map((p) => {
+  if (!st?.docs.services.model) return ui.nav.replaceChildren();
+  const tabs = PAGES.filter((p) => p.id !== 'widgets' || st.docs.widgets).map((p) => {
     const fresh = newCount(p.id);
     const count = itemCount(p.id);
     const b = h(
@@ -1201,7 +1300,7 @@ function renderNav() {
   const out = [h('div', { class: 'cfg-tablist', role: 'tablist', 'aria-label': 'Sections' }, ...tabs)];
   // on the Services page: a jump list of its groups
   if (st.page === 'services') {
-    const groups = Array.isArray(st.model.groups) ? st.model.groups : [];
+    const groups = Array.isArray(sm().groups) ? sm().groups : [];
     const jumps = groups.map((g, gi) => {
       if (!isObject(g)) return null;
       const b = h('button', { type: 'button', class: 'sub', rawText: g.name || t('Unnamed group') });
@@ -1245,6 +1344,7 @@ function servicesBar() {
 
 function renderForm() {
   const m = st.model;
+  ui.file.textContent = st.file ?? ''; // the Widgets page shows widgets.yaml
   const scroll = ui.main.scrollTop;
   const page = PAGES.find((p) => p.id === st.page) ?? PAGES[0];
   st.page = page.id;
@@ -1273,6 +1373,7 @@ function renderForm() {
   else if (page.id === 'hosts') body = [secHosts()];
   else if (page.id === 'settings') body = secSettings();
   else if (page.id === 'themes') body = secThemes();
+  else if (page.id === 'widgets') body = secWidgets();
   else body = [secTools()];
   ui.main.replaceChildren(head, ...[body].flat().filter(Boolean));
   ui.main.scrollTop = scroll;
@@ -1414,11 +1515,27 @@ function renderYaml() {
     area.setRangeText('  ', area.selectionStart, area.selectionEnd, 'end');
     area.dispatchEvent(new Event('input'));
   });
-  ui.main.replaceChildren(h('div', { class: 'cfg-yamlbox' }, colors, area));
+  const files = st.docs.widgets
+    ? h(
+        'div',
+        { class: 'cfg-filetabs', role: 'tablist', 'aria-label': 'File' },
+        ...['services', 'widgets'].map((k) => {
+          const b = h('button', { type: 'button', role: 'tab', class: 'cfg-filetab', 'aria-selected': st.yamlKind === k ? 'true' : 'false', rawText: k === 'widgets' ? 'widgets.yaml' : fileName(st.docs.services.file) }, docDirty(k) ? h('span', { class: 'cfg-dot', title: 'Unsaved changes' }) : null);
+          b.addEventListener('click', async () => {
+            if (k === st.yamlKind || !(await ensureMode(k, 'yaml'))) return;
+            st.yamlKind = k;
+            render();
+          });
+          return b;
+        })
+      )
+    : null;
+  ui.main.replaceChildren(...[files, h('div', { class: 'cfg-yamlbox' }, colors, area)].filter(Boolean));
 }
 
 function render() {
   ui.file.textContent = st.file ?? '';
+  if (st.tab === 'visual' && st.page === 'widgets' && st.docs.widgets?.mode !== 'visual') st.page = 'services';
   for (const [tab, b] of Object.entries(ui.tabs)) b.setAttribute('aria-selected', st.tab === tab ? 'true' : 'false');
   ui.body.dataset.tab = st.tab;
   if (st.tab === 'yaml') renderYaml();
@@ -1429,64 +1546,76 @@ function render() {
 /** Visual -> YAML: the hub writes the text; YAML -> Visual: the hub reads it back into the form. */
 async function switchTab(tab) {
   if (!st || st.busy || tab === st.tab) return;
-  try {
-    const { status, data } = await api('POST', '/api/config/render', source());
-    if (status !== 200) throw new Error(data.error);
-    if (tab === 'visual' && !data.model) {
-      st.errors = data.errors;
-      st.note = '';
-      return updateStatus(); // syntax error: stay on the text until it is fixed
-    }
-    st.base = data.text;
-    st.text = data.text;
-    st.model = data.model ?? st.model;
-    st.errors = data.errors;
-    st.open = new WeakSet();
-    st.tab = tab;
-    render();
-  } catch (err) {
-    st.note = err.message;
-    updateStatus();
-  }
+  // the file shown stays the same: the Widgets page <-> widgets.yaml, the other pages <-> the config
+  const kind = tab === 'yaml' ? (st.page === 'widgets' && st.docs.widgets ? 'widgets' : 'services') : st.yamlKind;
+  if (!(await ensureMode(kind, tab))) return;
+  if (tab === 'yaml') st.yamlKind = kind;
+  else if (kind === 'widgets') st.page = 'widgets';
+  else if (st.page === 'widgets') st.page = 'services';
+  st.tab = tab;
+  render();
 }
 
 /** Which services are unfolded, as positions, to unfold the same ones in a freshly loaded model. */
 function openPositions() {
   const out = [];
-  (Array.isArray(st.model?.groups) ? st.model.groups : []).forEach((g, gi) => (Array.isArray(g?.services) ? g.services : []).forEach((s, si) => st.open.has(s) && out.push([gi, si])));
+  (Array.isArray(sm().groups) ? sm().groups : []).forEach((g, gi) => (Array.isArray(g?.services) ? g.services : []).forEach((s, si) => st.open.has(s) && out.push([gi, si])));
   return out;
+}
+
+/** After a save: the doc is what the hub wrote (its form and text), the folded state stays. */
+function refreshDoc(kind, data) {
+  const old = st.docs[kind];
+  const d = newDoc({ ...data, file: old.file, writable: old.writable }, kind);
+  d.mode = old.mode === 'yaml' || !data.model ? 'yaml' : 'visual';
+  st.docs[kind] = d;
+  delete validated[kind];
 }
 
 async function save() {
   if (!st || st.busy || !isDirty()) return;
-  const wasOpen = st.tab === 'visual' ? openPositions() : [];
-  const openThemes = st.tab === 'visual' && isObject(st.model?.themes) ? Object.keys(st.model.themes).filter((k) => st.open.has(st.model.themes[k])) : [];
+  const wasOpen = openPositions();
+  const themes = isObject(sm().themes) ? sm().themes : {};
+  const openThemes = Object.keys(themes).filter((k) => st.open.has(themes[k]));
+  const openWidgets = Object.keys(wm()).filter((k) => st.open.has(wm()[k]));
+  const scroll = ui.main.scrollTop;
   st.busy = true;
   updateStatus();
+  let savedAny = false;
   try {
-    const { status, data } = await api('PUT', '/api/config', { ...source(), version: st.version });
-    if (status === 200) {
-      const scroll = ui.main.scrollTop;
-      adopt(data);
-      for (const [gi, si] of wasOpen) {
-        const svc = st.model?.groups?.[gi]?.services?.[si];
-        if (isObject(svc)) st.open.add(svc);
+    for (const kind of KINDS) {
+      if (!docDirty(kind)) continue;
+      const d = st.docs[kind];
+      const { status, data } = await api('PUT', `/api/config${q(kind)}`, { ...sourceOf(kind), version: d.version });
+      if (status === 200) {
+        refreshDoc(kind, data);
+        savedAny = true;
+        continue;
       }
-      for (const k of openThemes) if (isObject(st.model?.themes?.[k])) st.open.add(st.model.themes[k]);
-      st.note = t('Saved. The hub is using it now.');
-      render();
-      ui.main.scrollTop = scroll;
-      document.dispatchEvent(new CustomEvent('hub:config-saved'));
-      return;
+      st.busy = false;
+      if (status === 409) {
+        if (confirm(`${tr(data.error)}\n\n${t('Load the new version? Your changes here are lost.')}`)) return void load();
+      } else if (status === 422) {
+        d.errors = data.errors;
+      } else {
+        st.note = data.error ?? t('Not saved ({status}).', { status });
+      }
+      if (savedAny) document.dispatchEvent(new CustomEvent('hub:config-saved'));
+      return updateStatus();
     }
+    for (const [gi, si] of wasOpen) {
+      const svc = sm().groups?.[gi]?.services?.[si];
+      if (isObject(svc)) st.open.add(svc);
+    }
+    for (const k of openThemes) if (isObject(sm().themes?.[k])) st.open.add(sm().themes[k]);
+    for (const k of openWidgets) if (isObject(wm()[k])) st.open.add(wm()[k]);
     st.busy = false;
-    if (status === 409) {
-      if (confirm(`${tr(data.error)}\n\n${t('Load the new version? Your changes here are lost.')}`)) return void load();
-    } else if (status === 422) {
-      st.errors = data.errors;
-    } else {
-      st.note = data.error ?? t('Not saved ({status}).', { status });
-    }
+    st.note = t('Saved. The hub is using it now.');
+    render();
+    ui.main.scrollTop = scroll;
+    document.dispatchEvent(new CustomEvent('hub:config-saved'));
+    validate(); // the config's problems may have changed with the widgets
+    return;
   } catch (err) {
     st.busy = false;
     st.note = t('Not saved: {message}', { message: err.message });
@@ -1915,6 +2044,500 @@ function secThemes() {
   ];
 }
 
+// ---- widgets (widgets.yaml) ----
+const WIDGET_ID = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
+const MAX_FIELDS = 6;
+const WIDGET_FORMATS = [
+  ['auto', 'Automatic'],
+  ['number', 'Number'],
+  ['bytes', 'Size (KB, MB, GB …)'],
+  ['percent', 'Percent'],
+  ['duration', 'Duration (from seconds)'],
+  ['text', 'Text']
+];
+/** The widget a card uses: widget: name, or widget: { use: name, ... }. */
+const widgetUse = (svc) => (typeof svc?.widget === 'string' ? svc.widget : isObject(svc?.widget) && typeof svc.widget.use === 'string' ? svc.widget.use : null);
+const allServices = () => (Array.isArray(sm().groups) ? sm().groups : []).flatMap((g) => (isObject(g) && Array.isArray(g.services) ? g.services.filter(isObject) : []));
+const widgetUsers = (id) => allServices().filter((svc) => widgetUse(svc) === id);
+/** A copy without the position markers the hub put in (they only mean something in the file they came from). */
+const unmarked = (v) => (Array.isArray(v) ? v.map(unmarked) : isObject(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== ID).map(([k, x]) => [k, unmarked(x)])) : v);
+
+/** The {names} a widget asks the card for: placeholders that are neither {env:...} nor a host shortcut. */
+function widgetParams(w) {
+  const hosts = isObject(sm().hosts) ? sm().hosts : {};
+  const texts = [w?.path, w?.url, w?.body, ...Object.values(isObject(w?.headers) ? w.headers : {})].filter((x) => typeof x === 'string');
+  const out = new Set();
+  for (const text of texts) for (const [, name] of text.matchAll(/\{([A-Za-z0-9_-]+)\}/g)) if (!Object.hasOwn(hosts, name)) out.add(name);
+  return [...out];
+}
+
+function freeWidgetId(wanted) {
+  const all = wm();
+  const base = String(wanted ?? '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|-+$/g, '').slice(0, 34) || 'widget';
+  let id = base;
+  for (let i = 2; Object.hasOwn(all, id); i++) id = `${base}-${i}`;
+  return id;
+}
+
+function renameWidget(old, el) {
+  const next = el.value.trim();
+  if (next === old) return;
+  const problem = !WIDGET_ID.test(next) ? t('Use only letters, digits, - and _ for a widget name.') : Object.hasOwn(wm(), next) ? t('"{name}" already exists.', { name: next }) : '';
+  if (problem) {
+    el.value = old;
+    st.note = problem;
+    return updateStatus();
+  }
+  st.docs.widgets.model = Object.fromEntries(Object.entries(wm()).map(([k, v]) => [k === old ? next : k, v]));
+  // the cards that use it follow the new name
+  if (st.docs.services.mode === 'visual') {
+    for (const svc of widgetUsers(old)) {
+      if (typeof svc.widget === 'string') svc.widget = next;
+      else svc.widget.use = next;
+    }
+  }
+  touched();
+  renderForm();
+}
+
+/** One widget as YAML, to share. Header values that are not {placeholders} are left out: they are usually keys. */
+function widgetYaml(id, w) {
+  const q = (v) => JSON.stringify(String(v));
+  const lines = [`${id}:`];
+  if (w.name) lines.push(`  name: ${q(w.name)}`);
+  if (w.url) lines.push(`  url: ${q(w.url)}`);
+  else if (w.path) lines.push(`  path: ${q(w.path)}`);
+  if (w.method && String(w.method).toUpperCase() !== 'GET') lines.push(`  method: ${String(w.method).toUpperCase()}`);
+  if (w.insecure === true) lines.push('  insecure: true');
+  const headers = Object.entries(isObject(w.headers) ? w.headers : {});
+  if (headers.length) {
+    lines.push('  headers:');
+    for (const [k, v] of headers) lines.push(`    ${k}: ${q(/\{[^}]+\}/.test(String(v)) ? v : '{env:YOUR_API_KEY}')}`);
+  }
+  if (w.body != null && w.body !== '') lines.push(`  body: ${q(typeof w.body === 'string' ? w.body : JSON.stringify(w.body))}`);
+  lines.push('  fields:');
+  for (const f of Array.isArray(w.fields) ? w.fields.filter(isObject) : []) {
+    lines.push(`    - label: ${q(f.label ?? '')}`, `      value: ${q(f.value ?? '')}`);
+    if (f.format && f.format !== 'auto') lines.push(`      format: ${f.format}`);
+    if (f.suffix) lines.push(`      suffix: ${q(f.suffix)}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/** The headers of a widget as rows (name, value); the mapping is written again after every change. */
+function headerRows(w) {
+  const rows = Object.entries(isObject(w.headers) ? w.headers : {}).map(([k, v]) => ({ k, v: String(v ?? '') }));
+  const write = () => {
+    const out = {};
+    for (const r of rows) if (r.k.trim()) out[r.k.trim()] = r.v;
+    if (Object.keys(out).length) w.headers = out;
+    else delete w.headers;
+    touched();
+  };
+  const box = h('div', { class: 'cfg-wrows' });
+  const draw = () => {
+    box.replaceChildren(
+      ...rows.map((r, i) => {
+        const name = h('input', { type: 'text', class: 'cfg-in mono', placeholder: 'x-api-key', 'aria-label': 'Header name', spellcheck: 'false', autocomplete: 'off' });
+        name.value = r.k;
+        name.addEventListener('input', () => ((r.k = name.value), write()));
+        const value = h('input', { type: 'text', class: 'cfg-in mono', placeholder: '{env:IMMICH_API_KEY}', 'aria-label': 'Header value', spellcheck: 'false', autocomplete: 'off' });
+        value.value = r.v;
+        value.addEventListener('input', () => ((r.v = value.value), write()));
+        return h('div', { class: 'cfg-wrow hdr' }, name, value, iconBtn('x', 'Remove header', () => (rows.splice(i, 1), write(), draw()), { danger: true }));
+      }),
+      textBtn('plus', 'Add header', () => {
+        rows.push({ k: '', v: '' });
+        draw();
+        box.querySelector('.cfg-wrow:last-of-type input')?.focus();
+      })
+    );
+  };
+  draw();
+  return box;
+}
+
+/** The values a widget shows: label, where it is in the answer, how it is shown. */
+function fieldRows(w, redraw) {
+  if (!Array.isArray(w.fields)) w.fields = [];
+  const list = w.fields;
+  const rows = list.map((f, i) => {
+    if (!isObject(f)) return null;
+    const format = h('select', { class: 'cfg-in', 'aria-label': 'Shown as' }, ...WIDGET_FORMATS.map(([v, label]) => h('option', { value: v, text: label })));
+    format.value = WIDGET_FORMATS.some(([v]) => v === f.format) ? f.format : 'auto';
+    format.addEventListener('change', () => {
+      put(f, 'format', format.value === 'auto' ? undefined : format.value);
+      touched();
+    });
+    const value = input(() => f.value, (v) => put(f, 'value', v.trim()), { mono: true, placeholder: 'photos', label: 'Value in the answer' });
+    value.dataset.wvalue = '';
+    return h(
+      'div',
+      { class: 'cfg-wrow fld' },
+      input(() => f.label, (v) => put(f, 'label', v), { placeholder: 'Photos', label: 'Label' }),
+      value,
+      format,
+      input(() => f.suffix, (v) => put(f, 'suffix', v.trim()), { placeholder: 'unit', label: 'After the value (optional)' }),
+      h(
+        'span',
+        { class: 'cfg-acts' },
+        iconBtn('up', 'Move up', () => move(list, i, -1, redraw), { disabled: i === 0 }),
+        iconBtn('down', 'Move down', () => move(list, i, 1, redraw), { disabled: i === list.length - 1 }),
+        iconBtn('trash', 'Remove value', () => (list.splice(i, 1), touched(), redraw()), { danger: true })
+      )
+    );
+  });
+  const add = textBtn('plus', 'Add value', () => {
+    list.push({ label: '', value: '' });
+    touched();
+    redraw();
+    [...document.querySelectorAll('.cfg-wrow.fld input')].at(-4)?.focus();
+  });
+  add.disabled = list.length >= MAX_FIELDS;
+  return h(
+    'div',
+    { class: 'cfg-wrows' },
+    list.length ? h('div', { class: 'cfg-wrow fld head' }, ...['Label', 'Value in the answer', 'Shown as', 'Unit'].map((x) => h('span', { class: 'cfg-l', text: x })), h('span')) : null,
+    ...rows,
+    add
+  );
+}
+
+/** "Test": asks the API through the hub and shows what came back; a click on a value adds it. */
+function widgetTest(id, w, redraw) {
+  const users = widgetUsers(id);
+  const others = allServices().filter((svc) => !users.includes(svc) && (svc.local || svc.url));
+  const cards = [...users, ...others];
+  const sel = h('select', { class: 'cfg-in', 'aria-label': 'Card to test with' });
+  cards.forEach((svc, i) => sel.append(h('option', { value: String(i), rawText: `${svc.name || t('Unnamed service')} · ${svc.local || svc.url || ''}` })));
+  if (st.widgetTest?.id === id && Number.isInteger(st.widgetTest.card)) sel.value = String(st.widgetTest.card);
+  const out = h('div', { class: 'cfg-wtest' });
+  const show = (r) => {
+    if (!r) return out.replaceChildren();
+    const parts = [];
+    if (r.url) parts.push(h('div', { class: 'cfg-h' }, h('span', { text: 'Asked:' }), ' ', h('code', { rawText: r.url })));
+    if (!r.ok) {
+      parts.push(h('p', { class: 'cfg-h bad', text: r.error }));
+      return out.replaceChildren(...parts);
+    }
+    parts.push(
+      h(
+        'div',
+        { class: 'cfg-wvals' },
+        ...r.fields.map((f) => h('div', { class: `cfg-wval${f.error ? ' bad' : ''}` }, h('b', { rawText: f.error ? '!' : String(f.value) }), h('span', { rawText: f.label || '' }), f.error ? h('span', { class: 'cfg-h bad', text: f.error }) : null))
+      )
+    );
+    if (r.paths?.length) {
+      const chips = r.paths.map((p) => {
+        const b = h('button', { type: 'button', class: 'cfg-chip mono', title: 'Add as a value on the card' }, h('span', { rawText: p.path }), h('span', { class: 'cfg-chipval', rawText: ` = ${p.value === null ? 'null' : String(p.value)}` }));
+        b.addEventListener('click', () => {
+          if (!Array.isArray(w.fields)) w.fields = [];
+          const empty = w.fields.find((f) => isObject(f) && !f.value);
+          const label = p.path.replace(/^count\((.*)\)$/, '$1').split('.').filter((x) => !/^\d+$/.test(x)).pop() || '';
+          const nice = label.replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
+          if (empty) {
+            empty.value = p.path;
+            if (!empty.label) empty.label = nice;
+          } else if (w.fields.length < MAX_FIELDS) w.fields.push({ label: nice, value: p.path });
+          else {
+            st.note = t('A widget shows at most {n} values.', { n: MAX_FIELDS });
+            return updateStatus();
+          }
+          touched();
+          redraw();
+        });
+        return b;
+      });
+      parts.push(h('div', { class: 'cfg-h', text: 'In the answer (click one to show it on the card):' }), h('div', { class: 'cfg-chips cfg-paths' }, ...chips));
+    }
+    parts.push(h('details', { class: 'cfg-raw' }, h('summary', { text: 'The whole answer' }), h('pre', { rawText: r.answer })));
+    out.replaceChildren(...parts);
+  };
+  if (st.widgetTest?.id === id) show(st.widgetTest.result);
+  const go = textBtn('play', 'Test', async () => {
+    const svc = cards[Number(sel.value)] ?? {};
+    go.disabled = true;
+    out.replaceChildren(h('p', { class: 'cfg-h', text: 'Asking the API…' }));
+    try {
+      const body = { widget: unmarked(clean({ [id]: w }, 'widgets')[id]), service: unmarked({ url: svc.url, local: svc.local, insecure: svc.insecure, widget: svc.widget }) };
+      if (st.docs.services.mode === 'visual' && isObject(sm().hosts)) body.hosts = sm().hosts;
+      const { status, data } = await api('POST', '/api/config/widget-test', body);
+      const result = status === 200 ? data : { ok: false, error: tr(data.error) };
+      st.widgetTest = { id, card: Number(sel.value), result };
+      show(result);
+    } catch (err) {
+      show({ ok: false, error: err.message });
+    }
+    go.disabled = false;
+  }, 'primary');
+  if (cards.length === 0) {
+    return h('p', { class: 'cfg-h', text: w.url ? 'Add a card first, then test the widget here.' : 'Add a card with an address first: the path is asked on the card\'s address.' });
+  }
+  return h('div', { class: 'cfg-wtestbox' }, h('div', { class: 'cfg-iconrow' }, sel, go), out);
+}
+
+function widgetBox(id, w) {
+  const open = st.open.has(w);
+  const users = widgetUsers(id);
+  const title = h('span', { class: 'cfg-svcname', rawText: w.name || id });
+  const sub = h('span', { class: 'cfg-svcsub', rawText: `${id} · ${users.length === 1 ? t('used by 1 card') : t('used by {n} cards', { n: users.length })}` });
+  const summary = h('button', { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' }, svg('chev', 14), svg('chart', 22), h('span', { class: 'cfg-svctext' }, title, sub));
+  const redraw = () => {
+    const next = widgetBox(id, w);
+    el.replaceWith(next);
+    return next;
+  };
+  summary.addEventListener('click', () => {
+    if (open) st.open.delete(w);
+    else st.open.add(w);
+    redraw().querySelector('.cfg-svcsum').focus();
+  });
+  const share = iconBtn('share', t('Copy as YAML (to share it)'), async () => {
+    st.note = (await copyText(widgetYaml(id, w))) ? t('Copied. Keys in headers were replaced by {env:YOUR_API_KEY}. Import adds it to another hub.') : t('Could not copy. Switch to YAML and copy the block from there.');
+    updateStatus();
+  });
+  const duplicate = iconBtn('copy', 'Duplicate', () => {
+    const copy = unmarked(JSON.parse(JSON.stringify(w)));
+    if (copy.name) copy.name = t('{name} copy', { name: copy.name });
+    const nextId = freeWidgetId(`${id}-copy`);
+    st.docs.widgets.model = Object.fromEntries(Object.entries(wm()).flatMap(([k, v]) => (k === id ? [[k, v], [nextId, copy]] : [[k, v]])));
+    st.open.add(copy);
+    touched();
+    renderForm();
+  });
+  const remove = iconBtn('trash', t('Remove widget {name}', { name: w.name || id }), () => {
+    if (users.length > 0 && !confirm(t('{n} cards use this widget. Remove it from them too?', { n: users.length }))) return;
+    for (const svc of users) delete svc.widget;
+    delete wm()[id];
+    touched();
+    renderForm();
+  }, { danger: true });
+  const head = h('div', { class: 'cfg-svchead' }, summary, h('span', { class: 'cfg-acts' }, share, duplicate, remove));
+  const el = h('section', { class: `cfg-svc cfg-widget${open ? ' open' : ''}` }, head);
+  if (!open) return el;
+
+  const key = h('input', { type: 'text', class: 'cfg-in mono', 'aria-label': 'Name in the file', spellcheck: 'false', autocomplete: 'off' });
+  key.value = id;
+  key.addEventListener('change', () => renameWidget(id, key));
+  const nameIn = input(() => w.name, (v) => put(w, 'name', v), { placeholder: id, label: 'Name in the editor', after: () => (title.textContent = w.name || id) });
+
+  // where to ask: a path on the card's address, or a full address
+  const full = typeof w.url === 'string';
+  const where = h('select', { class: 'cfg-in', 'aria-label': 'Address' }, h('option', { value: 'path', text: "A path on the card's address" }), h('option', { value: 'url', text: 'A full address' }));
+  where.value = full ? 'url' : 'path';
+  const addr = full
+    ? input(() => w.url, (v) => put(w, 'url', v.trim()), { mono: true, placeholder: 'http://{nas}:2283/api/server/statistics', label: 'Full address' })
+    : input(() => w.path, (v) => put(w, 'path', v.trim()), { mono: true, placeholder: '/api/server/statistics', label: 'Path' });
+  where.addEventListener('change', () => {
+    if (where.value === 'url') {
+      w.url = w.path ? `http://{nas}${w.path.startsWith('/') ? '' : '/'}${w.path}` : '';
+      delete w.path;
+    } else {
+      w.path = typeof w.url === 'string' ? w.url.replace(/^https?:\/\/[^/]*/i, '') : '';
+      delete w.url;
+    }
+    touched();
+    redraw();
+  });
+  const method = h('select', { class: 'cfg-in', 'aria-label': 'Method' }, h('option', { value: 'GET', rawText: 'GET' }), h('option', { value: 'POST', rawText: 'POST' }));
+  method.value = String(w.method ?? 'GET').toUpperCase() === 'POST' ? 'POST' : 'GET';
+  method.addEventListener('change', () => {
+    if (method.value === 'POST') w.method = 'POST';
+    else {
+      delete w.method;
+      delete w.body;
+    }
+    touched();
+    redraw();
+  });
+  let body = null;
+  if (method.value === 'POST') {
+    body = h('textarea', { class: 'cfg-in mono cfg-paste', rows: 3, spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Body', placeholder: '{"query": "..."}' });
+    body.value = w.body == null ? '' : typeof w.body === 'string' ? w.body : JSON.stringify(w.body);
+    body.addEventListener('input', () => (put(w, 'body', body.value), touched()));
+  }
+  el.append(
+    h(
+      'div',
+      { class: 'cfg-svcform' },
+      fieldset('Widget', grid(2, field('Name in the editor', nameIn), field('Name in the file', key, 'Cards use the widget by this name. Letters, digits, - and _.'))),
+      fieldset(
+        'Request',
+        grid(2, field('Where', where), field(full ? 'Full address' : 'Path', addr, full ? 'Host shortcuts like {nas} work here.' : 'Added to the card\'s home address (or its public one).')),
+        grid(2, field('Method', method), check('Accept a self-signed certificate', w.insecure === true, (on) => put(w, 'insecure', on || undefined))),
+        body ? field('Body', body, 'Sent with the POST request. {placeholders} work here too.') : null,
+        h('div', { class: 'cfg-f' }, h('span', { class: 'cfg-l', text: 'Headers' }), headerRows(w), h('span', { class: 'cfg-h', text: 'Most APIs want a key in a header. Write {env:NAME} and set NAME in the hub\'s compose.yaml: then the key is not in the file. {name} asks each card for a value of its own.' }))
+      ),
+      fieldset(
+        'Values on the card',
+        fieldRows(w, redraw),
+        h('span', { class: 'cfg-h', text: 'Value: where it is in the answer. photos, data.total, items.0.name; count(items) for how many, sum(items.*.size) to add up. Test shows what the answer has.' })
+      ),
+      fieldset('Test', widgetTest(id, w, redraw))
+    )
+  );
+  return el;
+}
+
+/** The widgets in a pasted YAML text: several (name: {...}), a widgets: block, or the inside of one. */
+function widgetsIn(model) {
+  const isWidget = (v) => isObject(v) && Array.isArray(v.fields);
+  const map = isObject(model.widgets) ? model.widgets : model;
+  if (isWidget(map)) return [[map.name ?? 'imported', map]];
+  return Object.entries(map).filter(([, v]) => isWidget(v));
+}
+
+async function importWidgets(text) {
+  const { status, data } = await api('POST', '/api/config/render?file=widgets', { text });
+  if (status !== 200) throw new Error(tr(data.error ?? 'The text could not be read.'));
+  if (!isObject(data.model)) throw new Error(data.errors?.[0] ?? t('No widget found in the text.'));
+  const found = widgetsIn(data.model);
+  if (found.length === 0) throw new Error(t('No widget found in the text.'));
+  for (const [wanted, w] of found) {
+    const copy = unmarked(w);
+    st.docs.widgets.model[freeWidgetId(wanted)] = copy;
+    st.open.add(copy);
+  }
+  return found.length;
+}
+
+function widgetImportBox() {
+  const area = h('textarea', { class: 'cfg-in mono cfg-paste', rows: 8, spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Widget to import', placeholder: 'immich:\n  path: /api/server/statistics\n  headers:\n    x-api-key: "{env:IMMICH_API_KEY}"\n  fields:\n    - label: Photos\n      value: photos' });
+  area.value = st.widgetImport?.text ?? '';
+  area.addEventListener('input', () => (st.widgetImport.text = area.value));
+  const done = (n) => {
+    st.widgetImport = null;
+    st.note = n === 1 ? t('1 widget imported. Check it, then save.') : t('{n} widgets imported. Check them, then save.', { n });
+    touched();
+    renderForm();
+  };
+  const fail = (err) => {
+    st.note = err.message;
+    updateStatus();
+  };
+  return section(
+    'cfg-widgetimport',
+    'Import widgets',
+    'Paste a widget someone shared: the YAML that "Copy as YAML" gives, or several of them. Widgets with a name you already use get a number added.',
+    area,
+    h(
+      'div',
+      { class: 'cfg-tools' },
+      textBtn('plus', 'Import', () => importWidgets(area.value).then(done, fail), 'primary'),
+      textBtn(null, 'From a file…', async () => {
+        const f = await pickFile('.yaml,.yml,.txt');
+        if (f) importWidgets(f.text).then(done, fail);
+      }),
+      textBtn(null, 'Cancel', () => {
+        st.widgetImport = null;
+        renderForm();
+      })
+    )
+  );
+}
+
+function addWidget(wanted = 'my-widget', name = '') {
+  const id = freeWidgetId(wanted);
+  const w = { ...(name ? { name } : {}), path: '', fields: [{ label: '', value: '' }] };
+  st.docs.widgets.model[id] = w;
+  st.open.add(w);
+  touched();
+  return id;
+}
+
+function secWidgets() {
+  const list = Object.entries(wm()).filter(([, w]) => isObject(w));
+  const boxes = list.map(([id, w]) => widgetBox(id, w));
+  const add = () => {
+    addWidget();
+    renderForm();
+    const last = [...ui.main.querySelectorAll('.cfg-widget')].pop();
+    last?.scrollIntoView({ block: 'center' });
+    last?.querySelector('.cfg-svcform input')?.focus();
+  };
+  const anyOpen = list.some(([, w]) => st.open.has(w));
+  const bar = h(
+    'div',
+    { class: 'cfg-toolbar' },
+    textBtn('download', 'Import widgets…', () => {
+      st.widgetImport = st.widgetImport ? null : { text: '' };
+      renderForm();
+      ui.main.querySelector('.cfg-paste')?.focus();
+    }),
+    list.length > 1
+      ? textBtn('fold', anyOpen ? 'Close all' : 'Open all', () => {
+          for (const [, w] of list) {
+            if (anyOpen) st.open.delete(w);
+            else st.open.add(w);
+          }
+          renderForm();
+        })
+      : null,
+    textBtn('plus', 'Add widget', add)
+  );
+  return [
+    bar,
+    st.widgetImport ? widgetImportBox() : null,
+    h('div', { class: 'cfg-svcs' }, ...boxes),
+    boxes.length === 0 ? h('p', { class: 'cfg-empty', text: 'No widgets yet. Add one, or import one someone shared. Then pick it in a card under "Widget".' }) : null,
+    h('div', { id: 'cfg-widgets', class: 'cfg-add' }, textBtn('plus', 'Add widget', add, 'wide'))
+  ];
+}
+
+/** In a card's form: which widget it shows, and the values of its own that widget asks for. */
+function widgetField(svc) {
+  if (!st.docs.widgets) return null;
+  const all = wm();
+  const names = Object.keys(all).filter((k) => isObject(all[k]));
+  const current = widgetUse(svc) ?? '';
+  const sel = h('select', { class: 'cfg-in', 'aria-label': 'Widget' }, h('option', { value: '', text: 'No widget' }), ...names.map((n) => h('option', { value: n, rawText: all[n].name && all[n].name !== n ? `${all[n].name} (${n})` : n })));
+  if (current && !names.includes(current)) sel.append(h('option', { value: current, rawText: t('{name} (not in widgets.yaml)', { name: current }) }));
+  sel.value = current;
+  const redraw = () => box.replaceWith(widgetField(svc));
+  sel.addEventListener('change', () => {
+    if (!sel.value) delete svc.widget;
+    else if (isObject(svc.widget)) svc.widget.use = sel.value;
+    else svc.widget = sel.value;
+    touched();
+    redraw();
+  });
+  const def = current ? all[current] : null;
+  const params = def ? widgetParams(def) : [];
+  const paramInputs = params.map((p) =>
+    field(
+      `{${p}}`,
+      input(
+        () => (isObject(svc.widget) ? svc.widget[p] : ''),
+        (v) => {
+          const obj = isObject(svc.widget) ? svc.widget : { use: current };
+          put(obj, p, v);
+          svc.widget = Object.keys(obj).filter((k) => k !== ID).length > 1 ? obj : current; // only "use" left: the short form
+        },
+        { mono: true, label: p }
+      )
+    )
+  );
+  const editBtn = def
+    ? textBtn('chart', 'Edit widget', () => {
+        st.open.add(def);
+        goPage('widgets');
+      })
+    : null;
+  const newBtn = textBtn('plus', 'New widget for this card', () => {
+    const id = addWidget(svc.name || 'my-widget', svc.name || '');
+    if (isObject(svc.widget)) svc.widget.use = id;
+    else svc.widget = id;
+    goPage('widgets');
+  });
+  const box = fieldset(
+    'Widget',
+    h('div', { class: 'cfg-f' }, h('span', { class: 'cfg-l', text: 'Values from its API' }), h('div', { class: 'cfg-iconrow' }, sel, editBtn, newBtn), h('span', { class: 'cfg-h', text: 'Shows a few values from the service\'s own API on the card, e.g. how many photos Immich keeps. Widgets are made on the Widgets page.' })),
+    paramInputs.length ? grid(2, ...paramInputs) : null,
+    paramInputs.length ? h('span', { class: 'cfg-h', text: 'This widget asks each card for these values.' }) : null
+  );
+  return box;
+}
+
 function build() {
   if (dlg) return;
   ui.file = h('p', { class: 'cfg-file' });
@@ -1967,7 +2590,7 @@ function showTarget(target) {
     renderForm();
   }
   let el = target.section ? document.getElementById(target.section) : null;
-  const groups = Array.isArray(st.model.groups) ? st.model.groups : [];
+  const groups = Array.isArray(sm().groups) ? sm().groups : [];
   const gi = target.group == null ? -1 : groups.findIndex((g) => isObject(g) && g.name === target.group);
   if (gi >= 0) {
     const list = Array.isArray(groups[gi].services) ? groups[gi].services : [];
@@ -1993,9 +2616,9 @@ async function load(target) {
   ui.main.replaceChildren(h('p', { class: 'cfg-msg', text: 'Loading…' }));
   if (!dlg.open) dlg.showModal();
   try {
-    const { status, data } = await api('GET', '/api/config');
+    const [{ status, data }, widgets] = await Promise.all([api('GET', '/api/config'), api('GET', '/api/config?file=widgets').catch(() => null)]);
     if (status !== 200) throw new Error(tr(data.error) ?? t('The hub answered with an error ({status}).', { status }));
-    adopt(data);
+    adopt(data, widgets?.status === 200 ? widgets.data : null);
     st.filter = '';
     found = null;
     agents = null;

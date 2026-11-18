@@ -68,6 +68,7 @@ groups:
 | `check` | `http://…` / `https://…` (online = any answer below 500), `tcp://host:port` (port accepts connections), or `none` for a plain link |
 | `insecure` | `true` accepts a self-signed certificate on the check (Cockpit, Portainer) |
 | `containers` | Patterns (`*` wildcard) matched against container name, compose project or service name |
+| `widget` | A widget from `widgets.yaml`: values from the service's API on the card, see [widgets.md](widgets.md) |
 | `hidden` | `true` keeps the entry but hides it |
 | `hosts` | Aliases usable as `{name}` in `url`, `local` and `check` |
 
@@ -112,7 +113,7 @@ services:
       homelab-hub.check: http://{nas}:3000           # optional, like `check:` in the YAML
 ```
 
-Also understood: `homelab-hub.description`, `homelab-hub.insecure: "true"`, `homelab-hub.hide: "true"`.
+Also understood: `homelab-hub.description`, `homelab-hub.widget` ([widgets.md](widgets.md)), `homelab-hub.insecure: "true"`, `homelab-hub.hide: "true"`.
 Label cards join the group of the same name from the YAML (a card with the same name in the YAML wins), show the
 health of their container, and need the docker-proxy from `compose.yaml`. A label with a mistake is listed under
 `labelErrors` in `/api/containers`. Switch the feature off with `settings.dockerLabels: false`. Labels on containers

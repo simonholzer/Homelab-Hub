@@ -427,7 +427,7 @@ button.stats-title[aria-expanded="false"] .chev { transform: rotate(-90deg); }
 body.compact .cards { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
 body.compact .card { padding: 9px 12px; gap: 6px; }
 body.compact .card .icon { width: 24px; height: 24px; }
-body.compact .card .meta, body.compact .card .desc, body.compact .card .tag, body.compact .card .problem { display: none; }
+body.compact .card .meta, body.compact .card .desc, body.compact .card .widget, body.compact .card .tag, body.compact .card .problem { display: none; }
 body.compact .card .pill { font-size: 0; gap: 0; }
 body.compact .pin { top: 50%; bottom: auto; margin-top: -12px; right: 4px; background: var(--panel); }
 body.compact .pin.edit { right: 30px; }
@@ -542,6 +542,14 @@ body.compact .cardwrap:not(:hover) .pin:not(.on) { opacity: 0; }
 .card.down { border-color: color-mix(in srgb, var(--down) 40%, var(--border)); }
 
 .problem { color: var(--down); font-size: 0.78rem; margin-top: -4px; }
+
+/* widget: a few values from the service's own API, side by side under the name */
+.widget { display: flex; flex-wrap: wrap; gap: 6px; }
+.widget .wf { flex: 1 1 0; min-width: 64px; display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.widget .wv { font-weight: 650; font-size: 0.95rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.widget .wl { color: var(--muted); font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.widget .wf.bad .wv { color: var(--warn); }
+.widget.bad { color: var(--warn); font-size: 0.76rem; margin-top: -4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { color: var(--accent); font-size: 0.72rem; font-weight: 600; margin-top: -4px; }
 /* home-only card while away: the name and icon are dimmed, the online/offline state stays clear */
 .card.homeonly { cursor: default; }

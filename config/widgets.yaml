@@ -1,0 +1,44 @@
+# Widgets: a few values from a service's own API, shown on its card. This is the full EXAMPLE file;
+# the hub uses widgets.yaml next to its config (/config/widgets.yaml in Docker), made by the editor
+# (gear menu -> Edit services and settings -> Widgets) or by hand. A card uses one with  widget: <name>.
+# Keys come from the hub's environment ({env:NAME}, set under environment: in compose.yaml).
+# Explanation of every field: docs/widgets.md
+
+# Immich: photos, videos and storage of the whole server (an admin's API key)
+immich:
+  name: Immich statistics
+  path: /api/server/statistics
+  headers:
+    x-api-key: "{env:IMMICH_API_KEY}"
+  fields:
+    - label: Photos
+      value: photos
+      format: number
+    - label: Videos
+      value: videos
+      format: number
+    - label: Storage
+      value: usage
+      format: bytes
+
+# Jellyfin: who is watching right now (Dashboard -> API Keys)
+jellyfin:
+  name: Jellyfin streams
+  path: /Sessions?activeWithinSeconds=600
+  headers:
+    x-emby-token: "{env:JELLYFIN_API_KEY}"
+  fields:
+    - label: Streaming
+      value: count(*.NowPlayingItem)
+    - label: Active
+      value: count(.)
+
+# Sonarr (Radarr works the same with /api/v3/queue): downloads in the queue
+sonarr:
+  name: Sonarr queue
+  path: /api/v3/queue
+  headers:
+    x-api-key: "{env:SONARR_API_KEY}"
+  fields:
+    - label: In the queue
+      value: totalRecords

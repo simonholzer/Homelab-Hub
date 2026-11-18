@@ -84,8 +84,23 @@ const docker = http.createServer((req, res) => {
   ].map((c) => JSON.parse(JSON.stringify(c).replaceAll('{port}', String(services.address().port))))));
 });
 
-// fake services: /up answers 200, /down answers 503
+// fake services: /up answers 200, /down answers 503; a few made-up APIs for the widgets (widgets.yaml)
+const started = Date.now();
+const fakeApis = {
+  '/api/server/statistics': ['x-api-key', () => ({ photos: 48213 + Math.floor((Date.now() - started) / 20000), videos: 1902, usage: 442368000000, usageByUser: [{ userName: 'simon', photos: 40100 }, { userName: 'anna', photos: 8113 }] })],
+  '/Sessions': ['x-emby-token', () => [{ UserName: 'simon', NowPlayingItem: { Name: 'Arrival' } }, { UserName: 'anna' }, { UserName: 'tv', NowPlayingItem: { Name: 'Dark S01E03' } }]],
+  '/api/endpoints/1/docker/containers/json': ['x-api-key', () => Array.from({ length: 23 }, (_, i) => ({ Id: String(i), State: 'running' }))]
+};
 const services = http.createServer((req, res) => {
+  const api = fakeApis[req.url];
+  if (api) {
+    if (req.headers[api[0]] !== 'demo-key') {
+      res.writeHead(401);
+      return res.end();
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    return res.end(JSON.stringify(api[1]()));
+  }
   res.writeHead(req.url === '/down' ? 503 : 200, { 'content-type': 'text/plain' });
   res.end('demo');
 });
@@ -124,6 +139,7 @@ subtitle: example.com
 hosts:
   nas: 192.168.1.10
   pi: 192.168.1.20
+  demo: 127.0.0.1:${services.address().port}   # the made-up APIs of the widgets
 
 stats:
   name: NAS
@@ -142,11 +158,11 @@ groups:
     autoContainers: true
     services:
       - { name: TrueNAS, icon: truenas, url: "https://nas.example.com", local: "http://{nas}", check: "${up}" }
-      - { name: Immich, icon: immich, url: "https://photos.example.com", local: "http://{nas}:2283", check: "${up}" }
-      - { name: Jellyfin, icon: jellyfin, url: "https://media.example.com", local: "http://{nas}:8096", check: "${up}" }
+      - { name: Immich, icon: immich, url: "https://photos.example.com", local: "http://{nas}:2283", check: "${up}", widget: immich }
+      - { name: Jellyfin, icon: jellyfin, url: "https://media.example.com", local: "http://{nas}:8096", check: "${up}", widget: jellyfin }
       - { name: n8n, icon: n8n, url: "https://n8n.example.com", local: "http://{nas}:5678", check: "${up}" }
       - { name: Homarr, icon: homarr, url: "https://homarr.example.com", local: "http://{nas}:7575", check: "${up}" }
-      - { name: Portainer, icon: portainer, local: "https://{nas}:9443", check: "${up}" }
+      - { name: Portainer, icon: portainer, local: "https://{nas}:9443", check: "${up}", widget: portainer }
       - { name: Syncthing, icon: syncthing, local: "http://{nas}:8384", check: "${up}" }
       - { name: Uptime Kuma, icon: uptime-kuma, local: "http://{nas}:3001", check: "${up}" }
   - name: Raspberry Pi
@@ -161,6 +177,46 @@ groups:
       - { name: Domain, description: "DNS records and tunnels", url: "https://dash.example.com", check: none }
 `);
 
+// the widgets: the real APIs would be asked on the cards' addresses (path:), the demo asks its made-up ones (url:)
+const widgets = path.join(tmp, 'widgets.yaml');
+fs.writeFileSync(widgets, `# Demo widgets, written by scripts/demo.mjs. A real one would use  path: /api/...  on the card's address.
+immich:
+  name: Immich statistics
+  url: http://{demo}/api/server/statistics
+  headers:
+    x-api-key: "{env:IMMICH_API_KEY}"
+  fields:
+    - label: Photos
+      value: photos
+      format: number
+    - label: Videos
+      value: videos
+      format: number
+    - label: Storage
+      value: usage
+      format: bytes
+
+jellyfin:
+  name: Jellyfin streams
+  url: http://{demo}/Sessions
+  headers:
+    x-emby-token: "{env:JELLYFIN_API_KEY}"
+  fields:
+    - label: Streaming
+      value: count(*.NowPlayingItem)
+    - label: Sessions
+      value: count(.)
+
+portainer:
+  name: Portainer containers
+  url: http://{demo}/api/endpoints/1/docker/containers/json
+  headers:
+    x-api-key: "{env:PORTAINER_API_KEY}"
+  fields:
+    - label: Containers
+      value: count(.)
+`);
+
 const child = spawn(process.execPath, ['src/server.js'], {
   cwd: root,
   stdio: 'inherit',
@@ -172,7 +228,11 @@ const child = spawn(process.execPath, ['src/server.js'], {
     SYS_PATH: path.join(tmp, 'sys'),
     DOCKER_HOST: `http://127.0.0.1:${docker.address().port}`,
     CONFIG_PATH: config,
-    DEFAULT_CONFIG_PATH: config
+    DEFAULT_CONFIG_PATH: config,
+    WIDGETS_PATH: widgets,
+    IMMICH_API_KEY: 'demo-key',
+    JELLYFIN_API_KEY: 'demo-key',
+    PORTAINER_API_KEY: 'demo-key'
   }
 });
 console.log(`[demo] made-up data. Config you can edit live: ${config}`);

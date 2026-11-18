@@ -20,6 +20,7 @@ Everything is configured in **one YAML file**, which you can also edit on the pa
 - **Everything is edited on the page**: a form with drag and drop, or the YAML with color coding; a broken config never takes the page down
 - **Finds your services** in Docker, and **imports** from Homepage, Dashy and Homarr
 - **Icons by name** from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
+- **Widgets**: a few values from a service's own API on its card (photos in Immich, streams in Jellyfin …), made, tested and shared in the editor
 - **Themes**: dark, light, Catppuccin, Nord, Gruvbox, high contrast, and your own, made and shared in the editor
 - **Optional password login**, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
 - **Works on a phone** and can be installed as an app; English and German
@@ -71,6 +72,7 @@ groups:
 | | |
 |---|---|
 | [Configuration](docs/configuration.md) | The editor, every field of a card, plain links, icons, container health, cards from Docker labels, settings, language |
+| [Widgets](docs/widgets.md) | Values from a service's API on its card: making, testing and sharing widgets, `widgets.yaml` |
 | [Themes](docs/themes.md) | Picking a theme, making your own in the editor, the colors, sharing and importing themes |
 | [Server stats and other machines](docs/machines.md) | Storage and network tiles, agents on other machines, their containers, finding agents |
 | [Login, home network and proxies](docs/access.md) | Password login, local addresses at home, reverse proxies, login proxies |

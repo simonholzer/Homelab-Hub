@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { parse } from 'yaml';
+import { widgetRef, resolveWidget } from './widgets.js';
 
 export const DEFAULT_SETTINGS = { checkIntervalSeconds: 30, timeoutSeconds: 4, statsIntervalSeconds: 5 };
 export const LANGUAGES = ['auto', 'en', 'de'];
@@ -169,8 +170,13 @@ function normalizeCheck(raw, service, hosts, where, errors, loginHosts = []) {
   return null;
 }
 
-/** Validates the parsed YAML. Returns {config, errors}; config is null when unusable. */
-export function normalizeConfig(raw) {
+/**
+ * Validates the parsed YAML. Returns {config, errors}; config is null when unusable.
+ * @param {object} [o]
+ * @param {object} [o.widgets]  the widgets of widgets.yaml (see widgets.js), for cards with `widget:`
+ * @param {object} [o.env]      where {env:NAME} in a widget is read from (default: the hub's environment)
+ */
+export function normalizeConfig(raw, { widgets = {}, env = process.env } = {}) {
   const errors = [];
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
     return { config: null, errors: ['The file must contain a YAML mapping (title:, groups:, ...)'] };
@@ -317,6 +323,14 @@ export function normalizeConfig(raw) {
           return;
         }
         const check = normalizeCheck(svc.check, { ...svc, url: url || localUrl }, hosts, label, errors, settings.loginHosts);
+        // a few values from the service's own API (widgets.yaml)
+        let widget = null;
+        const ref = widgetRef(svc.widget, label, errors);
+        if (ref) {
+          const def = Object.hasOwn(widgets, ref.use) ? widgets[ref.use] : null;
+          if (!def) errors.push(`${label}.widget: there is no widget "${ref.use}" in widgets.yaml${Object.keys(widgets).length ? ` (there are: ${Object.keys(widgets).join(', ')})` : ''}`);
+          else widget = resolveWidget(ref, def, { base: localUrl || url, hosts, env, insecure: svc.insecure === true }, label, errors);
+        }
         services.push({
           id: `g${gi}s${si}`,
           name: svc.name.trim(),
@@ -325,6 +339,7 @@ export function normalizeConfig(raw) {
           description: svc.description == null ? '' : String(svc.description),
           icon: svc.icon == null ? '' : String(svc.icon),
           check,
+          ...(widget ? { widget } : {}),
           containers: asList(svc.containers),
           // no containers: of its own, but the group asks for automatic matching by name
           autoContainers: g.autoContainers === true && asList(svc.containers).length === 0
@@ -354,7 +369,8 @@ export function normalizeConfig(raw) {
         // network cards to count (default: all physical ones)
         network: asList(raw.stats?.network).map(String).filter((n) => /^[\w.:@-]+$/.test(n))
       },
-      groups
+      groups,
+      widgets // the widgets of widgets.yaml, for cards made from Docker labels
     },
     errors: []
   };
@@ -384,9 +400,9 @@ export function servicesFromLabels(containers, config) {
     if (seen.has(key)) continue; // several replicas of one service: one card
     seen.add(key);
     const svc = { name, containers: [c.name] };
-    for (const k of ['url', 'local', 'icon', 'check', 'description']) if (l[k] != null && l[k] !== '') svc[k] = l[k];
+    for (const k of ['url', 'local', 'icon', 'check', 'description', 'widget']) if (l[k] != null && l[k] !== '') svc[k] = l[k];
     if (String(l.insecure ?? '').toLowerCase() === 'true') svc.insecure = true;
-    const one = normalizeConfig({ hosts: config.hosts ?? {}, settings: { loginHosts: config.settings?.loginHosts ?? [] }, groups: [{ name: groupName, services: [svc] }] });
+    const one = normalizeConfig({ hosts: config.hosts ?? {}, settings: { loginHosts: config.settings?.loginHosts ?? [] }, groups: [{ name: groupName, services: [svc] }] }, { widgets: config.widgets ?? {} });
     if (!one.config) {
       errors.push(...one.errors.map((e) => `container ${c.name}: ${e}`));
       continue;
@@ -400,8 +416,12 @@ export function servicesFromLabels(containers, config) {
   return { groups: [...groups.values()], errors };
 }
 
-/** Parses YAML text. YAML syntax errors come back as errors, never as exceptions. */
-export function parseConfigText(text) {
+/**
+ * Parses YAML text. YAML syntax errors come back as errors, never as exceptions.
+ * @param {string} text
+ * @param {object} [o]  passed on to normalizeConfig (widgets, env)
+ */
+export function parseConfigText(text, o) {
   let raw;
   try {
     raw = parse(text);
@@ -411,7 +431,7 @@ export function parseConfigText(text) {
     const first = String(err.message).split('\n')[0];
     return { config: null, errors: [`YAML syntax error${where}: ${first}`] };
   }
-  return normalizeConfig(raw);
+  return normalizeConfig(raw, o);
 }
 
 /**

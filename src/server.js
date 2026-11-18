@@ -154,6 +154,7 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
     editor && typeof monitor.readConfigFile === 'function'
       ? createConfigApi({
           getFile: () => monitor.readConfigFile(),
+          getWidgetsFile: () => monitor.widgetsPath ?? null,
           getIcons: icons,
           iconsDir: userIcons,
           download: downloadIcon,
@@ -173,7 +174,7 @@ export function createApp({ monitor, network, publicDir = path.join(root, 'publi
   const pages = new Map(); // the pages with versioned links, kept until one of those versions changes
 
   return http.createServer((req, res) => {
-    const isConfigApi = /^\/api\/config(\/|$)/.test(req.url ?? '');
+    const isConfigApi = /^\/api\/config(\/|\?|$)/.test(req.url ?? '');
     const isAuthApi = auth != null && req.method === 'POST' && /^\/api\/(login|logout|password)$/.test(req.url ?? '');
     if (req.method !== 'GET' && req.method !== 'HEAD' && !(configApi && isConfigApi) && !isAuthApi) {
       res.writeHead(405, { allow: 'GET, HEAD', ...SECURITY_HEADERS });
@@ -380,6 +381,7 @@ function main() {
     configPath: process.env.CONFIG_PATH ?? path.join(root, 'config', 'services.yaml'),
     defaultConfigPath: process.env.DEFAULT_CONFIG_PATH ?? path.join(root, 'config', 'services.yaml'),
     dockerHost: process.env.DOCKER_HOST ?? '',
+    widgetsPath: process.env.WIDGETS_PATH || undefined,
     procPath: process.env.PROC_PATH ?? '/proc',
     sysPath: process.env.SYS_PATH ?? '/sys'
   });

@@ -423,3 +423,40 @@ body.cfg-dragging, body.cfg-dragging * { cursor: grabbing !important; user-selec
 @media (max-width: 760px) {
   .cfg-themetop { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---- widgets (widgets.yaml) ---- */
+/* YAML tab: one tab per file above the text */
+.cfg-filetabs { display: flex; gap: 2px; padding: 8px 12px 0; background: var(--panel); border-bottom: 1px solid var(--border); }
+.cfg-filetab { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid transparent; border-bottom: none; border-radius: 8px 8px 0 0; background: none; color: var(--muted); font: inherit; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.82rem; cursor: pointer; margin-bottom: -1px; }
+.cfg-filetab:hover { color: var(--text); }
+.cfg-filetab[aria-selected="true"] { background: var(--bg); color: var(--text); border-color: var(--border); }
+.cfg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+/* header and value rows */
+.cfg-wrows { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.cfg-wrows > .cfg-btn { align-self: flex-start; }
+.cfg-wrow { display: grid; gap: 6px; align-items: center; }
+.cfg-wrow.hdr { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) auto; }
+.cfg-wrow.fld { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.6fr) auto; }
+.cfg-wrow.fld.head { margin-bottom: -4px; }
+.cfg-wrow.fld.head > :last-child { width: 100px; }
+.cfg-wrow .cfg-acts { display: flex; gap: 2px; }
+/* the test */
+.cfg-wtestbox { display: flex; flex-direction: column; gap: 10px; }
+.cfg-wtestbox .cfg-iconrow .cfg-in { flex: 1; min-width: 0; }
+.cfg-wtest { display: flex; flex-direction: column; gap: 8px; }
+.cfg-wtest code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; word-break: break-all; }
+.cfg-wvals { display: flex; flex-wrap: wrap; gap: 6px; }
+.cfg-wval { display: flex; flex-direction: column; min-width: 80px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 0.8rem; }
+.cfg-wval b { font-size: 1rem; }
+.cfg-wval > span { color: var(--muted); }
+.cfg-wval.bad b { color: var(--warn); }
+.cfg-paths { max-height: 180px; overflow-y: auto; }
+.cfg-chip.mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 0.76rem; }
+.cfg-chipval { color: var(--muted); }
+.cfg-raw summary { cursor: pointer; color: var(--muted); font-size: 0.8rem; }
+.cfg-raw pre { max-height: 260px; overflow: auto; margin: 6px 0 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 0.76rem; }
+@media (max-width: 720px) {
+  .cfg-wrow.fld { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .cfg-wrow.fld.head { display: none; }
+  .cfg-wrow.fld .cfg-acts { grid-column: 1 / -1; justify-content: flex-end; }
+}

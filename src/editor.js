@@ -6,6 +6,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { parseDocument, isMap, isSeq, isScalar } from 'yaml';
 import { parseConfigText, normalizeConfig } from './config.js';
+import { normalizeWidgets, parseWidgetsText, resolveWidget, requestJson, readFields, widgetRef, WIDGETS_STARTER } from './widgets.js';
 
 /** Items of a list carry their position in the original file under this key, so a renamed or moved
  *  entry is still recognised (and keeps its comments). It never reaches the file. */
@@ -30,13 +31,25 @@ export function strip(value) {
   return value;
 }
 
-/** What the editor page needs to know about a YAML text. model is null when it can't be shown as a form. */
-export function describe(text) {
+/**
+ * What the editor page needs to know about a YAML text. model is null when it can't be shown as a form.
+ * @param {string} text
+ * @param {object} [o]
+ * @param {'services'|'widgets'} [o.kind]  which file the text is
+ * @param {object} [o.widgets]  services: the widgets cards may use (from widgets.yaml)
+ */
+export function describe(text, { kind = 'services', widgets = {} } = {}) {
   const doc = parseDocument(text);
+  if (kind === 'widgets') {
+    if (doc.errors.length > 0) return { text, model: null, errors: parseWidgetsText(text).errors, version: versionOf(text) };
+    const js = doc.toJS();
+    // a file with only comments (or nothing) is an empty list of widgets
+    return { text, model: js == null ? {} : isObject(js) ? tag(js) : null, errors: normalizeWidgets(js).errors, version: versionOf(text) };
+  }
   // syntax errors: the config loader words them (line and column); otherwise the text is parsed only once
   if (doc.errors.length > 0) return { text, model: null, errors: parseConfigText(text).errors, version: versionOf(text) };
   const js = doc.toJS();
-  return { text, model: isObject(js) ? tag(js) : null, errors: normalizeConfig(js).errors, version: versionOf(text) };
+  return { text, model: isObject(js) ? tag(js) : null, errors: normalizeConfig(js, { widgets }).errors, version: versionOf(text) };
 }
 
 const keyOf = (pair) => String(isScalar(pair.key) ? pair.key.value : pair.key);
@@ -186,7 +199,8 @@ export function keepBackup(file, now = new Date()) {
 
 function isWritable(file) {
   try {
-    fs.accessSync(file, fs.constants.W_OK);
+    // a file that doesn't exist yet (widgets.yaml) can be written when its folder can
+    fs.accessSync(fs.existsSync(file) ? file : path.dirname(file), fs.constants.W_OK);
     return true;
   } catch {
     return false;
@@ -287,16 +301,47 @@ export function checkSvg(text) {
  * @param {string|null} [o.iconsDir]  where downloaded icons are kept
  * @param {(url: string) => Promise<string>} [o.download]
  * @param {() => void} [o.onIcon]  called after an icon was added
+ * @param {() => string|null} [o.getWidgetsFile]  path of widgets.yaml (null = no widgets)
+ * @param {Function} [o.request]  override for tests: how a widget test asks the API
+ * @param {object} [o.env]  where {env:NAME} is read from
+ * Every route takes ?file=widgets to work on widgets.yaml instead of the config file.
+ *   POST /api/config/widget-test  {widget, service} -> what the API answers and the values read from it
  * @returns {(req, res, pathname: string, json: Function) => Promise<void>}
  */
-export function createConfigApi({ getFile, getIcons = () => ({}), onSaved = () => {}, iconsDir = null, download, onIcon = () => {} }) {
+export function createConfigApi({ getFile, getIcons = () => ({}), onSaved = () => {}, iconsDir = null, download, onIcon = () => {}, getWidgetsFile = () => null, request = requestJson, env = process.env }) {
   download ??= downloadSvg;
+  /** The text of a file; a missing widgets.yaml is empty. */
+  const read = (file, kind) => {
+    try {
+      return fs.readFileSync(file, 'utf8');
+    } catch (err) {
+      if (kind === 'widgets' && err.code === 'ENOENT') return '';
+      throw err;
+    }
+  };
+  const widgetsOnDisk = () => {
+    const file = getWidgetsFile();
+    return file ? parseWidgetsText(read(file, 'widgets')).widgets : {};
+  };
   return async function handle(req, res, pathname, json) {
     try {
+      const kind = new URL(req.url ?? '/', 'http://localhost').searchParams.get('file') === 'widgets' ? 'widgets' : 'services';
+      const fileOf = () => {
+        const file = kind === 'widgets' ? getWidgetsFile() : getFile();
+        if (!file) throw Object.assign(new Error('This hub has no widgets file.'), { status: 404 });
+        return file;
+      };
       if (pathname === '/api/config' && (req.method === 'GET' || req.method === 'HEAD')) {
-        const file = getFile();
-        const text = fs.readFileSync(file, 'utf8');
-        return json(res, 200, { ...describe(text), file, writable: isWritable(file), icons: getIcons() });
+        const file = fileOf();
+        const text = read(file, kind);
+        const info = kind === 'widgets' ? describe(text || WIDGETS_STARTER, { kind }) : describe(text, { kind, widgets: widgetsOnDisk() });
+        // a widgets.yaml that isn't there yet starts with the explaining comments; saving creates it
+        if (kind === 'widgets' && !text) info.version = versionOf('');
+        return json(res, 200, { ...info, kind, file, writable: isWritable(file), icons: getIcons() });
+      }
+      if (pathname === '/api/config/widget-test' && req.method === 'POST') {
+        if (!fromOwnPage(req)) return json(res, 403, { error: 'Changes are only accepted from the hub page itself.' });
+        return json(res, 200, await testWidget(await readBody(req), { getFile, read, request, env }));
       }
       if (pathname === '/api/config/icon' && req.method === 'POST') {
         if (!fromOwnPage(req)) return json(res, 403, { error: 'Changes are only accepted from the hub page itself.' });
@@ -329,17 +374,20 @@ export function createConfigApi({ getFile, getIcons = () => ({}), onSaved = () =
       if (!fromOwnPage(req)) return json(res, 403, { error: 'Changes are only accepted from the hub page itself.' });
       const body = await readBody(req);
       let text;
+      let widgets;
       try {
         text = textFrom(body);
+        // the config is checked against the widgets being edited next to it (body.widgets), else the saved ones
+        if (kind === 'services') widgets = body.widgets ? parseWidgetsText(textFrom(body.widgets)).widgets : widgetsOnDisk();
       } catch (err) {
         return json(res, 400, { error: err.message });
       }
       if (text.length > 0 && !text.endsWith('\n')) text += '\n';
-      const result = describe(text);
-      if (render) return json(res, 200, result);
+      const result = describe(text, { kind, widgets });
+      if (render) return json(res, 200, { ...result, kind });
 
-      const file = getFile();
-      const current = fs.readFileSync(file, 'utf8');
+      const file = fileOf();
+      const current = read(file, kind);
       if (body.version !== versionOf(current)) {
         return json(res, 409, { error: 'The file was changed in the meantime (by hand or in another tab).' });
       }
@@ -359,9 +407,62 @@ export function createConfigApi({ getFile, getIcons = () => ({}), onSaved = () =
         console.log(`[config] saved from the page: ${file}`);
         onSaved();
       }
-      return json(res, 200, { ...result, saved: true });
+      return json(res, 200, { ...result, kind, saved: true });
     } catch (err) {
       return json(res, err.status ?? 500, { error: err.status ? err.message : `Config editor: ${err.code ?? err.message}` });
     }
   };
+}
+
+/**
+ * Tries a widget before it is saved: asks the API the way the card would and returns the answer
+ * (shortened) and the values read from it, so the right names can be picked.
+ * @param {object} body  {widget: the widget as in widgets.yaml, service: {url, local, insecure, widget}}
+ */
+export async function testWidget(body, { getFile, read, request = requestJson, env = process.env }) {
+  const errors = [];
+  const { widgets, errors: defErrors } = normalizeWidgets({ test: body?.widget });
+  if (!widgets.test || defErrors.length > 0) return { ok: false, error: defErrors[0]?.replace(/^test(\.|: )/, '') ?? 'The widget is not complete yet.' };
+  // host shortcuts: those of the form being edited (body.hosts), else those of the saved config
+  let hosts = {};
+  try {
+    const raw = isObject(body?.hosts) ? body.hosts : parseDocument(read(getFile(), 'services')).toJS()?.hosts;
+    if (isObject(raw)) for (const [k, v] of Object.entries(raw)) hosts[k] = String(v);
+  } catch {
+    // no config to read: no shortcuts
+  }
+  const svc = isObject(body?.service) ? body.service : {};
+  const fill = (v) => (typeof v === 'string' && v ? v.replace(/\{([A-Za-z0-9_-]+)\}/g, (m, k) => (Object.hasOwn(hosts, k) ? hosts[k] : m)) : '');
+  const ref = widgetRef(isObject(svc.widget) ? { ...svc.widget, use: 'test' } : 'test', 'card', errors) ?? { use: 'test', params: {} };
+  const resolved = resolveWidget(ref, widgets.test, { base: fill(svc.local) || fill(svc.url), hosts, env, insecure: svc.insecure === true }, 'card', errors);
+  if (!resolved) return { ok: false, error: errors[0]?.replace(/^card\.widget(?: \([^)]*\))?:? ?/, '') ?? "The widget can't be asked." };
+  if (resolved.problem) return { ok: false, error: resolved.problem, url: resolved.request.url };
+  const answer = await request(resolved.request, 8000);
+  if (answer.error) return { ok: false, error: answer.error, url: resolved.request.url };
+  let preview = JSON.stringify(answer.data, null, 2);
+  if (preview.length > 20000) preview = `${preview.slice(0, 20000)}\n…`;
+  return { ok: true, url: resolved.request.url, answer: preview, fields: readFields(answer.data, resolved.fields), paths: answerPaths(answer.data) };
+}
+
+/**
+ * The values in an answer as the paths a widget's `value:` takes ("photos", "data.total", "count(items)"),
+ * each with what it is now. Of a list only the first entry is shown (and how many there are).
+ */
+export function answerPaths(data, max = 150) {
+  const out = [];
+  const walk = (v, at, depth) => {
+    if (out.length >= max || depth > 8) return;
+    if (Array.isArray(v)) {
+      out.push({ path: `count(${at || '.'})`, value: v.length });
+      if (v.length > 0) walk(v[0], at ? `${at}.0` : '0', depth + 1);
+      return;
+    }
+    if (isObject(v)) {
+      for (const [k, x] of Object.entries(v)) if (/^[A-Za-z0-9_$-]+$/.test(k)) walk(x, at ? `${at}.${k}` : k, depth + 1);
+      return;
+    }
+    out.push({ path: at || '.', value: typeof v === 'string' && v.length > 40 ? `${v.slice(0, 39)}…` : v });
+  };
+  walk(data, '', 0);
+  return out;
 }

@@ -1,5 +1,5 @@
 // Renders /api/status. All text goes in through textContent (config values are never HTML).
-import { t, setLanguage, LANGUAGES } from '/i18n.js';
+import { t, setLanguage, LANGUAGES, language } from '/i18n.js';
 
 const DEFAULT_REFRESH_SECONDS = 10;
 const MIN_REFRESH_SECONDS = 2;
@@ -35,7 +35,7 @@ try {
 }
 
 // What the page shows: chosen in the gear menu, remembered in this browser.
-const prefs = { health: true, stats: true, pinned: true, newTab: true, compact: false, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', customTheme: null, lang: 'auto' };
+const prefs = { health: true, widgets: true, stats: true, pinned: true, newTab: true, compact: false, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', customTheme: null, lang: 'auto' };
 // the built-in themes come from theme.js; themes of your own (themes: in the YAML) from the server
 const BUILTIN_THEMES = window.hubTheme?.BUILTIN ?? [{ id: 'dark', name: 'Dark' }, { id: 'light', name: 'Light' }];
 const isBuiltinTheme = (id) => id === 'auto' || BUILTIN_THEMES.some((b) => b.id === id);
@@ -46,7 +46,7 @@ function validRefresh(value) {
 }
 try {
   const saved = JSON.parse(localStorage.getItem('hub-prefs') ?? '{}');
-  for (const key of ['health', 'stats', 'pinned', 'newTab', 'compact']) if (typeof saved[key] === 'boolean') prefs[key] = saved[key];
+  for (const key of ['health', 'widgets', 'stats', 'pinned', 'newTab', 'compact']) if (typeof saved[key] === 'boolean') prefs[key] = saved[key];
   prefs.refreshSeconds = validRefresh(saved.refreshSeconds) ?? DEFAULT_REFRESH_SECONDS;
   if (Array.isArray(saved.hiddenGroups)) prefs.hiddenGroups = saved.hiddenGroups.filter((n) => typeof n === 'string');
   if (typeof saved.theme === 'string' && /^[a-z0-9][a-z0-9_-]*$/i.test(saved.theme)) prefs.theme = saved.theme;
@@ -197,6 +197,27 @@ function formatUptime(sec) {
   if (d > 0) return t('{d} d {h} h', { d, h: hr });
   if (hr > 0) return t('{h} h {m} min', { h: hr, m });
   return t('{m} min', { m });
+}
+
+/** A widget value (see src/widgets.js) in the way its format asks for. */
+function formatWidgetValue(value, format) {
+  if (typeof value !== 'number' || format === 'text') return String(value);
+  const num = (n, digits) => n.toLocaleString(language(), { maximumFractionDigits: digits });
+  if (format === 'bytes') return formatBytes(value);
+  if (format === 'percent') return `${num(value, 1)} %`;
+  if (format === 'duration') return formatUptime(value);
+  return num(value, Number.isInteger(value) ? 0 : 2);
+}
+
+/** The values a card's widget shows, under its name. */
+function widgetBox(w) {
+  if (!w) return null;
+  if (w.error) return h('div', { class: 'widget bad', title: t(w.error), text: t(w.error) });
+  const items = (w.fields ?? []).map((f) => {
+    const value = f.error ? '!' : w.pending || f.value == null ? '…' : `${formatWidgetValue(f.value, f.format)}${f.suffix ? ` ${f.suffix}` : ''}`;
+    return h('div', { class: `wf${f.error ? ' bad' : ''}`, title: f.error ? t(f.error) : null }, h('span', { class: 'wv', text: value }), h('span', { class: 'wl', text: f.label }));
+  });
+  return items.length ? h('div', { class: 'widget' }, ...items) : null;
 }
 
 function ago(ms) {
@@ -506,6 +527,7 @@ function card(svc, groupName) {
   const meta = h('div', { class: 'meta' }, h('span', { class: 'host', text: hostText }), healthBadge(svc));
   const body = [top];
   if (svc.description) body.push(h('div', { class: 'desc', text: svc.description }));
+  if (prefs.widgets) body.push(widgetBox(svc.widget));
   const cls = `card ${status}${href ? '' : ' homeonly'}`;
   const a = href
     ? h('a', { class: cls, href, target: prefs.newTab ? '_blank' : null, rel: 'noopener noreferrer' }, ...body)
@@ -846,6 +868,11 @@ function renderSettings() {
     h('div', { class: 'set-title', text: t('Cards') }),
     toggleRow(t('Container health badges'), prefs.health, (on) => {
       prefs.health = on;
+      savePrefs();
+      renderGroups();
+    }),
+    toggleRow(t('Widget values'), prefs.widgets, (on) => {
+      prefs.widgets = on;
       savePrefs();
       renderGroups();
     }),
