@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseConfigText } from '../src/config.js';
+import { parseConfigText, BUILTIN_THEMES, isColor } from '../src/config.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -151,4 +151,66 @@ test('statsIntervalSeconds: default 5, range 1 to 3600', () => {
   assert.equal(parseConfigText(base('statsIntervalSeconds: 2')).config.settings.statsIntervalSeconds, 2);
   assert.match(parseConfigText(base('statsIntervalSeconds: 0')).errors.join(), /statsIntervalSeconds/);
   assert.match(parseConfigText(base('statsIntervalSeconds: 99999')).errors.join(), /statsIntervalSeconds/);
+});
+
+// ---- themes ----
+
+test('a theme of your own: base plus the colors it names', () => {
+  const { config, errors } = parseConfigText(`${MINIMAL}
+themes:
+  purple-night:
+    name: Purple night
+    base: nord
+    accent: "#b48eff"
+    panelHover: rgb(20, 18, 33)
+  plain:
+    up: "#0f0"
+`);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(config.themes, [
+    { id: 'purple-night', name: 'Purple night', base: 'nord', colors: { '--accent': '#b48eff', '--panel-hover': 'rgb(20, 18, 33)' } },
+    { id: 'plain', name: 'plain', base: 'dark', colors: { '--up': '#0f0' } }
+  ]);
+});
+
+test('no themes: an empty list', () => {
+  assert.deepEqual(parseConfigText(MINIMAL).config.themes, []);
+});
+
+test('theme mistakes are reported', () => {
+  const { config, errors } = parseConfigText(`${MINIMAL}
+themes:
+  nord:
+    accent: "#fff"
+  bad name!:
+    accent: "#fff"
+  mine:
+    base: solarized
+    accent: red
+    glow: "#fff"
+    bg: "url(https://evil.example/x.png)"
+`);
+  assert.equal(config, null);
+  assert.ok(errors.some((e) => e.includes('themes.nord') && e.includes('built-in')));
+  assert.ok(errors.some((e) => e.includes('themes.bad name!')));
+  assert.ok(errors.some((e) => e.startsWith('themes.mine.base')));
+  assert.ok(errors.some((e) => e.startsWith('themes.mine.accent')));
+  assert.ok(errors.some((e) => e.startsWith('themes.mine.glow')));
+  assert.ok(errors.some((e) => e.startsWith('themes.mine.bg')));
+});
+
+test('only plain colors pass', () => {
+  for (const ok of ['#abc', '#abcd', '#aabbcc', '#aabbccdd', 'rgb(1, 2, 3)', 'rgba(1,2,3,0.5)', 'hsl(210 50% 40% / 80%)']) assert.ok(isColor(ok), ok);
+  for (const bad of ['red', '#abcde', 'var(--bg)', 'url(x)', 'rgb(1,2,3);color:red', '#fff}body{', '', 12]) assert.ok(!isColor(bad), String(bad));
+});
+
+test('every built-in theme has its block in style.css and its entry in theme.js', () => {
+  const css = fs.readFileSync(path.join(here, '..', 'public', 'style.css'), 'utf8');
+  const js = fs.readFileSync(path.join(here, '..', 'public', 'theme.js'), 'utf8');
+  for (const id of BUILTIN_THEMES) {
+    if (id !== 'dark') assert.ok(css.includes(`:root[data-theme="${id}"]`), `style.css: ${id}`); // dark is plain :root
+    assert.ok(js.includes(`id: '${id}'`), `theme.js: ${id}`);
+  }
+  const listed = [...js.matchAll(/id: '([a-z-]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(listed, BUILTIN_THEMES);
 });

@@ -10,6 +10,67 @@ export const DEFAULT_SETTINGS = { checkIntervalSeconds: 30, timeoutSeconds: 4, s
 export const LANGUAGES = ['auto', 'en', 'de'];
 /** Docker labels that make a card: homelab-hub.name, homelab-hub.url, ... */
 export const LABEL_PREFIX = 'homelab-hub.';
+/** The themes that come with the hub (a block each in public/style.css, listed in public/theme.js too). */
+export const BUILTIN_THEMES = ['dark', 'light', 'catppuccin', 'nord', 'gruvbox', 'high-contrast'];
+/** The colors a theme of your own may set: YAML key -> CSS variable (see the top of public/style.css). */
+export const THEME_COLORS = {
+  bg: '--bg', panel: '--panel', panelHover: '--panel-hover', border: '--border', borderStrong: '--border-strong',
+  text: '--text', muted: '--muted', accent: '--accent', onAccent: '--on-accent',
+  up: '--up', down: '--down', warn: '--warn', unknown: '--unknown', track: '--track', shadow: '--shadow'
+};
+const MAX_THEMES = 20;
+
+/** #rgb, #rrggbb (with alpha too), rgb(...) or hsl(...) with numbers only: nothing else can get into the page's CSS. */
+export function isColor(value) {
+  if (typeof value !== 'string') return false;
+  const v = value.trim();
+  return /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v) || /^(?:rgba?|hsla?)\(\s*[\d.%\s,/+-]+\)$/i.test(v);
+}
+
+/**
+ * `themes:` -> [{id, name, base, colors: {'--accent': '#...'}}]. Each theme starts from a built-in one
+ * (base, default dark) and changes only the colors it names.
+ */
+function normalizeThemes(raw, errors) {
+  const themes = [];
+  if (raw == null) return themes;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push('themes: must be a mapping like  my-theme: { base: dark, accent: "#b48eff" }');
+    return themes;
+  }
+  for (const [id, t] of Object.entries(raw)) {
+    const where = `themes.${id}`;
+    if (!/^[a-z0-9][a-z0-9_-]{0,39}$/i.test(id)) {
+      errors.push(`${where}: a theme name may only use letters, digits, - and _ (up to 40)`);
+      continue;
+    }
+    if (BUILTIN_THEMES.includes(id.toLowerCase()) || id.toLowerCase() === 'auto') {
+      errors.push(`${where}: "${id}" is a built-in theme; give yours another name (and base: ${id} to start from it)`);
+      continue;
+    }
+    if (t == null || typeof t !== 'object' || Array.isArray(t)) {
+      errors.push(`${where}: must be a mapping of colors, e.g. accent: "#b48eff"`);
+      continue;
+    }
+    const base = t.base == null ? 'dark' : String(t.base).toLowerCase();
+    if (!BUILTIN_THEMES.includes(base)) errors.push(`${where}.base: must be one of ${BUILTIN_THEMES.join(', ')}`);
+    const colors = {};
+    for (const [key, value] of Object.entries(t)) {
+      if (key === 'base' || key === 'name') continue;
+      if (!Object.hasOwn(THEME_COLORS, key)) {
+        errors.push(`${where}.${key}: unknown color; use ${Object.keys(THEME_COLORS).join(', ')}`);
+      } else if (!isColor(value)) {
+        errors.push(`${where}.${key}: "${value}" is not a color like "#7aa2ff" or "rgb(122, 162, 255)" (put # colors in quotes)`);
+      } else colors[THEME_COLORS[key]] = value.trim();
+    }
+    if (themes.length >= MAX_THEMES) {
+      errors.push(`themes: at most ${MAX_THEMES} themes`);
+      break;
+    }
+    themes.push({ id, name: t.name == null ? id : String(t.name).slice(0, 60), base: BUILTIN_THEMES.includes(base) ? base : 'dark', colors });
+  }
+  return themes;
+}
 
 /** Replaces {alias} with the value from `hosts:`; unknown aliases are reported. */
 export function interpolate(value, hosts, where, errors) {
@@ -187,6 +248,8 @@ export function normalizeConfig(raw) {
   if (!LANGUAGES.includes(language)) errors.push(`settings.language: must be one of ${LANGUAGES.join(', ')}`);
   settings.language = LANGUAGES.includes(language) ? language : 'auto';
 
+  const themes = normalizeThemes(raw.themes, errors);
+
   const disks = normalizeDisks(raw.stats?.disks, 'stats.disks', errors);
 
   // Other machines whose numbers are shown too: each runs this program in agent mode (see agent.js).
@@ -283,6 +346,7 @@ export function normalizeConfig(raw) {
       hosts,
       subtitle: raw.subtitle == null ? '' : String(raw.subtitle),
       settings,
+      themes,
       stats: {
         name: raw.stats?.name == null ? '' : String(raw.stats.name),
         disks,

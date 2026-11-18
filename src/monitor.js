@@ -278,6 +278,7 @@ export class Monitor {
       generatedAt: Date.now(),
       checkedAt: this.checkedAt,
       language: config.settings.language ?? 'auto',
+      themes: config.themes ?? [],
       checkIntervalSeconds: config.settings.checkIntervalSeconds,
       statsIntervalSeconds: config.settings.statsIntervalSeconds,
       statsAt: this.statsAt ?? null,

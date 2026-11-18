@@ -2,6 +2,16 @@
 
 Every released version, newest first. The Docker image of a version is `ghcr.io/simonholzer/homelab-hub:<version>`.
 
+## 1.5.0
+
+- **More themes.** Catppuccin Mocha, Nord, Gruvbox and high contrast join dark and light (gear menu → Appearance).
+- **Themes of your own.** Make them in the editor on the new *Themes* page: start from a built-in theme, change
+  the colors you want with a color picker, see a small preview, or try the theme on the whole page before saving.
+  Saved themes show up in the theme list for everyone. They live under `themes:` in the YAML (see the README,
+  *Themes of your own*), so they can also be written by hand and shared.
+
+Updating needs no changes.
+
 ## 1.4.0
 
 - **Containers on other machines.** An agent with `DOCKER_HOST` (compose.agent.yaml now brings its own read-only

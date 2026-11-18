@@ -21,7 +21,9 @@ const ICONS = {
   link: 'M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1',
   gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1',
   box: 'M4 7l8-4 8 4v10l-8 4-8-4zM4 7l8 4 8-4M12 11v10',
-  fold: 'M7 10l5-5 5 5M7 14l5 5 5-5'
+  fold: 'M7 10l5-5 5 5M7 14l5 5 5-5',
+  palette: 'M12 3a9 9 0 1 0 0 18c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1.1-.3-.3-.4-.6-.4-1 0-.8.7-1.4 1.5-1.4H16a5 5 0 0 0 5-5c0-4.4-4-8-9-8zM7.5 11.5h.01M9.5 7.5h.01M14.5 7.5h.01M17 11h.01',
+  eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'
 };
 
 /**
@@ -34,6 +36,7 @@ const PAGES = [
   { id: 'machines', icon: 'server', label: 'Machines', desc: 'The stats tiles at the top of the page: this server, and other machines that run the agent.', sections: ['cfg-own', 'cfg-stats', 'cfg-agents-sec'] },
   { id: 'hosts', icon: 'link', label: 'Host shortcuts', desc: 'Short names for addresses, used as {name} in service addresses.', sections: ['cfg-hosts'] },
   { id: 'settings', icon: 'gear', label: 'Settings', desc: 'How the page looks and how often the hub checks things.', sections: ['cfg-general', 'cfg-timing', 'cfg-home', 'cfg-proxy', 'cfg-docker'] },
+  { id: 'themes', icon: 'palette', label: 'Themes', desc: 'Color themes of your own. Each starts from a built-in theme and changes only the colors you set. After saving, everyone can pick them in the gear menu under Appearance.', sections: ['cfg-themes'] },
   { id: 'backup', icon: 'box', label: 'Import and backup', desc: '', sections: ['cfg-tools'] }
 ];
 const pageOf = (sectionId) => (/^cfg-group-/.test(sectionId ?? '') ? 'services' : PAGES.find((p) => p.sections.includes(sectionId))?.id ?? null);
@@ -117,7 +120,7 @@ function clean(model) {
   if (!model) return model;
   const m = JSON.parse(JSON.stringify(model));
   if (isObject(m.settings?.home) && Object.keys(m.settings.home).length === 0) delete m.settings.home;
-  for (const k of ['settings', 'stats', 'hosts']) if (isObject(m[k]) && Object.keys(m[k]).length === 0) delete m[k];
+  for (const k of ['settings', 'stats', 'hosts', 'themes']) if (isObject(m[k]) && Object.keys(m[k]).length === 0) delete m[k];
   return m;
 }
 
@@ -1165,6 +1168,7 @@ function itemCount(page) {
   if (page === 'services') return (Array.isArray(m.groups) ? m.groups : []).filter(isObject).reduce((n, g) => n + (Array.isArray(g.services) ? g.services.length : 0), 0);
   if (page === 'machines') return 1 + (Array.isArray(m.stats?.machines) ? m.stats.machines.length : 0);
   if (page === 'hosts') return isObject(m.hosts) ? Object.keys(m.hosts).length : 0;
+  if (page === 'themes') return isObject(m.themes) ? Object.keys(m.themes).length : 0;
   return null;
 }
 
@@ -1266,6 +1270,7 @@ function renderForm() {
   } else if (page.id === 'machines') body = secStats();
   else if (page.id === 'hosts') body = [secHosts()];
   else if (page.id === 'settings') body = secSettings();
+  else if (page.id === 'themes') body = secThemes();
   else body = [secTools()];
   ui.main.replaceChildren(head, ...[body].flat().filter(Boolean));
   ui.main.scrollTop = scroll;
@@ -1370,6 +1375,231 @@ function requestClose() {
   dlg.close();
 }
 
+// ---- themes ----
+/** The colors of a theme: YAML key, CSS variable, label (the same list as THEME_COLORS in src/config.js). */
+const THEME_COLORS = [
+  ['bg', '--bg', 'Background'],
+  ['panel', '--panel', 'Cards'],
+  ['panelHover', '--panel-hover', 'Card under the mouse'],
+  ['border', '--border', 'Lines'],
+  ['borderStrong', '--border-strong', 'Strong lines'],
+  ['text', '--text', 'Text'],
+  ['muted', '--muted', 'Quiet text'],
+  ['accent', '--accent', 'Accent'],
+  ['onAccent', '--on-accent', 'Text on accent'],
+  ['up', '--up', 'Online'],
+  ['down', '--down', 'Offline'],
+  ['warn', '--warn', 'Warning'],
+  ['unknown', '--unknown', 'Unknown'],
+  ['track', '--track', 'Bar background'],
+  ['shadow', '--shadow', 'Shadow']
+];
+const builtinThemes = () => window.hubTheme?.BUILTIN ?? [{ id: 'dark', name: 'Dark' }, { id: 'light', name: 'Light' }];
+const isBuiltinTheme = (id) => id.toLowerCase() === 'auto' || builtinThemes().some((b) => b.id === id.toLowerCase());
+let trying = null; // the theme shown on the whole page while the editor is open, or null
+
+/** The colors of a built-in theme, read from its block in style.css. */
+const baseCache = new Map();
+function baseColors(base) {
+  if (baseCache.has(base)) return baseCache.get(base);
+  const selector = base === 'dark' ? ':root' : `:root[data-theme="${base}"]`;
+  const out = {};
+  for (const sheet of document.styleSheets) {
+    let rules;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue; // not ours
+    }
+    for (const r of rules) {
+      if (r.selectorText !== selector) continue;
+      for (const [, v] of THEME_COLORS) if (r.style.getPropertyValue(v).trim()) out[v] = r.style.getPropertyValue(v).trim();
+    }
+  }
+  baseCache.set(base, out);
+  return out;
+}
+
+/** Any CSS color -> #rrggbb for the color picker (which knows no transparency), or null when it is no color. */
+let colorCtx = null;
+function toHex(color) {
+  if (typeof color !== 'string' || !color.trim()) return null;
+  colorCtx ??= document.createElement('canvas').getContext('2d');
+  const probe = (start) => {
+    colorCtx.fillStyle = start;
+    colorCtx.fillStyle = color.trim();
+    return colorCtx.fillStyle;
+  };
+  const v = probe('#010203');
+  if (v !== probe('#040506')) return null; // the browser kept the old value: not a color
+  if (v.startsWith('#')) return v;
+  const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(v);
+  return m ? '#' + m.slice(1, 4).map((n) => Number(n).toString(16).padStart(2, '0')).join('') : null;
+}
+
+const themeBase = (th) => {
+  const b = String(th.base ?? 'dark').toLowerCase();
+  return builtinThemes().some((x) => x.id === b) ? b : 'dark';
+};
+
+/** The theme as the page uses it: {id, base, colors: {'--accent': ...}}. */
+function themeForPage(id, th) {
+  const colors = {};
+  for (const [key, v] of THEME_COLORS) if (typeof th[key] === 'string' && toHex(th[key])) colors[v] = th[key].trim();
+  return { id, base: themeBase(th), colors };
+}
+
+/** Back to the theme this browser has chosen in the gear menu. */
+function restoreTheme() {
+  trying = null;
+  try {
+    const saved = JSON.parse(localStorage.getItem('hub-prefs') ?? '{}');
+    window.hubTheme?.apply(typeof saved.theme === 'string' ? saved.theme : 'auto', saved.customTheme ?? null);
+  } catch {
+    window.hubTheme?.apply('auto', null);
+  }
+}
+
+function renameTheme(old, el) {
+  const m = st.model;
+  const next = el.value.trim();
+  if (next === old) return;
+  const problem = !/^[a-z0-9][a-z0-9_-]{0,39}$/i.test(next)
+    ? t('Use only letters, digits, - and _ for a theme name.')
+    : isBuiltinTheme(next)
+      ? t('"{name}" is a built-in theme. Choose another name.', { name: next })
+      : Object.hasOwn(m.themes, next)
+        ? t('"{name}" already exists.', { name: next })
+        : '';
+  if (problem) {
+    el.value = old;
+    st.note = problem;
+    return updateStatus();
+  }
+  m.themes = Object.fromEntries(Object.entries(m.themes).map(([k, v]) => [k === old ? next : k, v]));
+  if (trying === old) trying = next;
+  touched();
+  renderForm();
+}
+
+/** A small picture of the page in the theme's colors (set on the box itself, the page keeps its own). */
+function themePreview(vars) {
+  const box = h(
+    'div',
+    { class: 'cfg-tprev', 'aria-hidden': 'true' },
+    h(
+      'div',
+      { class: 'cfg-tprev-card' },
+      h('span', { class: 'cfg-tprev-title', text: 'Service' }),
+      h('span', { class: 'cfg-tprev-muted', rawText: '192.168.1.10' }),
+      h('span', { class: 'cfg-tprev-dots' }, ...['up', 'down', 'warn', 'unknown'].map((s) => h('i', { class: s })))
+    ),
+    h('div', { class: 'cfg-tprev-card hover' }, h('span', { class: 'cfg-tprev-bar' }, h('i')), h('span', { class: 'cfg-tprev-btn', text: 'Button' }))
+  );
+  for (const [name, value] of Object.entries(vars)) box.style.setProperty(name, value);
+  return box;
+}
+
+function themeBox(id, th) {
+  const m = st.model;
+  const base = themeBase(th);
+  const vars = () => ({ ...baseColors(base), ...themeForPage(id, th).colors });
+  let preview = themePreview(vars());
+  const repaint = () => {
+    const next = themePreview(vars());
+    preview.replaceWith(next);
+    preview = next;
+    if (trying === id) window.hubTheme?.apply(id, themeForPage(id, th));
+  };
+
+  const key = h('input', { type: 'text', class: 'cfg-in mono', 'aria-label': 'Name in the file', spellcheck: 'false', autocomplete: 'off' });
+  key.value = id;
+  key.addEventListener('change', () => renameTheme(id, key));
+  const baseSel = h('select', { class: 'cfg-in' }, ...builtinThemes().map((b) => h('option', { value: b.id, text: b.name })));
+  baseSel.value = base;
+  baseSel.addEventListener('change', () => {
+    th.base = baseSel.value;
+    touched();
+    if (trying === id) window.hubTheme?.apply(id, themeForPage(id, th));
+    renderForm();
+  });
+
+  const colors = THEME_COLORS.map(([k, v, label]) => {
+    const fallback = baseColors(base)[v] ?? '';
+    const picker = h('input', { type: 'color', class: 'cfg-swatch', 'aria-label': label, title: 'Pick a color' });
+    picker.value = toHex(th[k]) ?? toHex(fallback) ?? '#000000';
+    let reset = null;
+    const text = input(() => th[k], (val) => put(th, k, val.trim()), {
+      mono: true,
+      placeholder: fallback,
+      label,
+      after: () => {
+        const hex = toHex(text.value);
+        if (hex) picker.value = hex;
+        reset.disabled = th[k] == null;
+        repaint();
+      }
+    });
+    picker.addEventListener('input', () => {
+      th[k] = picker.value;
+      text.value = picker.value;
+      reset.disabled = false;
+      repaint();
+      touched();
+    });
+    reset = iconBtn('x', t('Use the color of the base theme'), () => {
+      delete th[k];
+      text.value = '';
+      picker.value = toHex(fallback) ?? '#000000';
+      reset.disabled = true;
+      repaint();
+      touched();
+    }, { disabled: th[k] == null });
+    return h('div', { class: 'cfg-f' }, h('span', { class: 'cfg-l', text: label }), h('div', { class: 'cfg-color' }, picker, text, reset));
+  });
+
+  const tryBtn = textBtn('eye', trying === id ? 'Stop trying' : 'Try on the page', () => {
+    if (trying === id) restoreTheme();
+    else {
+      trying = id;
+      window.hubTheme?.apply(id, themeForPage(id, th));
+    }
+    renderForm();
+  }, trying === id ? 'primary' : '');
+  const remove = iconBtn('trash', t('Remove theme {name}', { name: th.name || id }), () => {
+    if (trying === id) restoreTheme();
+    delete m.themes[id];
+    touched();
+    renderForm();
+  }, { danger: true });
+
+  return h(
+    'section',
+    { class: 'cfg-sec cfg-theme' },
+    h('div', { class: 'cfg-themehead' }, input(() => th.name, (v) => put(th, 'name', v), { big: true, placeholder: id, label: 'Name in the menu' }), tryBtn, remove),
+    h('div', { class: 'cfg-themetop' }, grid(2, field('Name in the file', key, 'Letters, digits, - and _.'), field('Starts from', baseSel, 'Colors you leave empty come from here.')), preview),
+    grid(3, ...colors)
+  );
+}
+
+function secThemes() {
+  const m = st.model;
+  const themes = isObject(m.themes) ? m.themes : {};
+  const boxes = Object.entries(themes).map(([id, th]) => (isObject(th) ? themeBox(id, th) : null));
+  const add = textBtn('plus', 'Add theme', () => {
+    const all = child(m, 'themes');
+    let name = 'my-theme';
+    for (let i = 2; Object.hasOwn(all, name); i++) name = `my-theme-${i}`;
+    all[name] = { name: t('My theme'), base: 'dark' };
+    touched();
+    renderForm();
+    const heads = ui.main.querySelectorAll('.cfg-themehead input');
+    heads[heads.length - 1]?.select();
+    heads[heads.length - 1]?.scrollIntoView({ block: 'center' });
+  }, 'wide');
+  return [...boxes, boxes.length === 0 ? h('p', { class: 'cfg-empty', text: 'No themes of your own yet.' }) : null, h('div', { id: 'cfg-themes', class: 'cfg-add' }, add)];
+}
+
 function build() {
   if (dlg) return;
   ui.file = h('p', { class: 'cfg-file' });
@@ -1398,6 +1628,7 @@ function build() {
     ui.problems,
     h('footer', { class: 'cfg-foot' }, ui.status, textBtn(null, 'Close', requestClose), ui.save)
   );
+  dlg.addEventListener('close', () => trying && restoreTheme()); // a theme being tried ends with the editor
   dlg.addEventListener('cancel', (e) => {
     e.preventDefault(); // Esc asks first when there are unsaved changes
     requestClose();

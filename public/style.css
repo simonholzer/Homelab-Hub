@@ -1,5 +1,8 @@
 /* Dark is the default. Light applies when the system asks for it, or when chosen in the gear menu
-   (data-theme on <html>, set by theme.js before the page is drawn). The two light blocks are the same. */
+   (data-theme on <html>, set by theme.js before the page is drawn). The two light blocks are the same.
+   The other built-in themes follow the light ones; a new one is a block here plus an entry in theme.js
+   and in BUILTIN_THEMES (src/config.js). Themes of your own (themes: in the YAML) start from one of these
+   and set some of the variables on <html> directly. */
 :root {
   color-scheme: dark;
   --bg: #040506;
@@ -55,6 +58,83 @@
   --unknown: #6b7480;
   --track: #e6e9ee;
   --shadow: rgba(20, 30, 50, 0.18);
+}
+/* Catppuccin Mocha (https://catppuccin.com, MIT) */
+:root[data-theme="catppuccin"] {
+  color-scheme: dark;
+  --bg: #181825;
+  --panel: #1e1e2e;
+  --panel-hover: #262637;
+  --border: #313244;
+  --border-strong: #45475a;
+  --text: #cdd6f4;
+  --muted: #9399b2;
+  --accent: #cba6f7;
+  --on-accent: #11111b;
+  --up: #a6e3a1;
+  --down: #f38ba8;
+  --warn: #fab387;
+  --unknown: #7f849c;
+  --track: #313244;
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+/* Nord (https://www.nordtheme.com, MIT) */
+:root[data-theme="nord"] {
+  color-scheme: dark;
+  --bg: #2e3440;
+  --panel: #3b4252;
+  --panel-hover: #414a5b;
+  --border: #434c5e;
+  --border-strong: #4c566a;
+  --text: #eceff4;
+  --muted: #aab3c2;
+  --accent: #88c0d0;
+  --on-accent: #2e3440;
+  --up: #a3be8c;
+  --down: #d0737c;
+  --warn: #ebcb8b;
+  --unknown: #7b8598;
+  --track: #434c5e;
+  --shadow: rgba(0, 0, 0, 0.35);
+}
+/* Gruvbox dark (https://github.com/morhetz/gruvbox, MIT) */
+:root[data-theme="gruvbox"] {
+  color-scheme: dark;
+  --bg: #1d2021;
+  --panel: #282828;
+  --panel-hover: #32302f;
+  --border: #3c3836;
+  --border-strong: #504945;
+  --text: #ebdbb2;
+  --muted: #a89984;
+  --accent: #fabd2f;
+  --on-accent: #1d2021;
+  --up: #b8bb26;
+  --down: #fb4934;
+  --warn: #fe8019;
+  --unknown: #928374;
+  --track: #3c3836;
+  --shadow: rgba(0, 0, 0, 0.6);
+}
+/* High contrast: black and white, strong borders; online/offline in blue/orange, which most
+   colour-blind eyes still tell apart */
+:root[data-theme="high-contrast"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: #000000;
+  --panel-hover: #141414;
+  --border: #8a8a8a;
+  --border-strong: #ffffff;
+  --text: #ffffff;
+  --muted: #d6d6d6;
+  --accent: #ffffff;
+  --on-accent: #000000;
+  --up: #5cb8ff;
+  --down: #ff8c1a;
+  --warn: #ffe14d;
+  --unknown: #b0b0b0;
+  --track: #333333;
+  --shadow: rgba(0, 0, 0, 0);
 }
 
 * { box-sizing: border-box; }

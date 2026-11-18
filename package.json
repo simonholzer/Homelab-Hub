@@ -1,6 +1,6 @@
 {
   "name": "homelab-hub",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "description": "Self-hosted link page for a homelab: every web UI with an online/offline dot, Docker container health and server stats. Config is one YAML file.",
   "license": "MIT",

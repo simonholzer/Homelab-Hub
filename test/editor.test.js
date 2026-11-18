@@ -70,6 +70,24 @@ test('entries can be removed and reordered; their comments travel with them', ()
   assert.match(out, /timeoutSeconds: 4 {10}# aligned comment/);
 });
 
+test('themes made in the form are written as valid YAML: # colors quoted, renames and removals kept', () => {
+  const { model } = describe(YAML);
+  model.themes = { mine: { name: 'Mine', base: 'nord', accent: '#ff6ac1' }, gone: { up: '#0f0' } };
+  let out = applyModel(YAML, model);
+  assert.match(out, /accent: "#ff6ac1"/);
+  let again = describe(out);
+  assert.deepEqual(again.errors, []);
+  again.model.themes = { renamed: again.model.themes.mine };
+  again.model.themes.renamed.panel = 'rgb(10, 20, 30)';
+  out = applyModel(out, again.model);
+  again = describe(out);
+  assert.deepEqual(again.errors, []);
+  assert.deepEqual(Object.keys(again.model.themes), ['renamed']);
+  assert.equal(again.model.themes.renamed.accent, '#ff6ac1');
+  assert.equal(again.model.themes.renamed.panel, 'rgb(10, 20, 30)');
+  assert.match(out, /# top comment/);
+});
+
 test('a text with syntax errors has no model, only problems', () => {
   const d = describe('title: [oops\n');
   assert.equal(d.model, null);

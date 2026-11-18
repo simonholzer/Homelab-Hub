@@ -35,8 +35,10 @@ try {
 }
 
 // What the page shows: chosen in the gear menu, remembered in this browser.
-const prefs = { health: true, stats: true, pinned: true, newTab: true, compact: false, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', lang: 'auto' };
-const THEMES = ['auto', 'dark', 'light'];
+const prefs = { health: true, stats: true, pinned: true, newTab: true, compact: false, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', customTheme: null, lang: 'auto' };
+// the built-in themes come from theme.js; themes of your own (themes: in the YAML) from the server
+const BUILTIN_THEMES = window.hubTheme?.BUILTIN ?? [{ id: 'dark', name: 'Dark' }, { id: 'light', name: 'Light' }];
+const isBuiltinTheme = (id) => id === 'auto' || BUILTIN_THEMES.some((b) => b.id === id);
 /** A whole number of seconds within the allowed range, or null. */
 function validRefresh(value) {
   const n = Math.round(Number(value));
@@ -47,7 +49,8 @@ try {
   for (const key of ['health', 'stats', 'pinned', 'newTab', 'compact']) if (typeof saved[key] === 'boolean') prefs[key] = saved[key];
   prefs.refreshSeconds = validRefresh(saved.refreshSeconds) ?? DEFAULT_REFRESH_SECONDS;
   if (Array.isArray(saved.hiddenGroups)) prefs.hiddenGroups = saved.hiddenGroups.filter((n) => typeof n === 'string');
-  if (THEMES.includes(saved.theme)) prefs.theme = saved.theme;
+  if (typeof saved.theme === 'string' && /^[a-z0-9][a-z0-9_-]*$/i.test(saved.theme)) prefs.theme = saved.theme;
+  if (saved.customTheme && typeof saved.customTheme === 'object' && saved.customTheme.id === prefs.theme) prefs.customTheme = saved.customTheme;
   if (saved.lang === 'auto' || Object.hasOwn(LANGUAGES, saved.lang)) prefs.lang = saved.lang;
 } catch {
   // storage blocked or damaged: everything is shown
@@ -60,11 +63,30 @@ function savePrefs() {
   }
 }
 
-/** Dark, light, or what the system says (the same rule as theme.js, which runs before the page is drawn). */
+/** The chosen theme, or what the system says (the same code as before the page was drawn: theme.js). */
 function applyTheme() {
-  if (prefs.theme === 'auto') delete document.documentElement.dataset.theme;
+  if (window.hubTheme) window.hubTheme.apply(prefs.theme, prefs.customTheme);
+  else if (prefs.theme === 'auto') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = prefs.theme;
   document.body.classList.toggle('compact', prefs.compact);
+}
+
+/** Chooses a theme: 'auto', a built-in one or one of the YAML's (whose colors are then kept in this browser too). */
+function chooseTheme(id) {
+  prefs.theme = id;
+  prefs.customTheme = isBuiltinTheme(id) ? null : (data?.themes ?? []).find((t) => t.id === id) ?? null;
+  if (!isBuiltinTheme(id) && !prefs.customTheme) prefs.theme = 'auto';
+  savePrefs();
+  applyTheme();
+  darkLogo.clear(); // logos are measured against the new background
+  drawnCards = null;
+}
+
+/** A theme of your own that was changed or removed in the YAML: the page follows. */
+function syncCustomTheme() {
+  if (!data || isBuiltinTheme(prefs.theme)) return;
+  const current = (data.themes ?? []).find((t) => t.id === prefs.theme) ?? null;
+  if (JSON.stringify(current) !== JSON.stringify(prefs.customTheme)) chooseTheme(prefs.theme);
 }
 
 /** Things this browser was told once and should not see again (the first-start guide, a notice). */
@@ -715,6 +737,7 @@ function renderFooter() {
 }
 
 function render() {
+  syncCustomTheme();
   if (data) {
     els.title.textContent = data.title;
     els.subtitle.textContent = data.subtitle;
@@ -839,13 +862,15 @@ function renderSettings() {
     h('div', { class: 'set-title', text: t('Refresh') }),
     refreshRow(),
     h('div', { class: 'set-title', text: t('Appearance') }),
-    selectRow(t('Theme'), prefs.theme, [['auto', t('Automatic')], ['dark', t('Dark')], ['light', t('Light')]], (v) => {
-      prefs.theme = v;
-      savePrefs();
-      applyTheme();
-      darkLogo.clear(); // logos are measured against the new background
-      renderGroups();
-    }),
+    selectRow(
+      t('Theme'),
+      prefs.theme,
+      [['auto', t('Automatic')], ...BUILTIN_THEMES.map((b) => [b.id, t(b.name)]), ...(data?.themes ?? []).map((c) => [c.id, c.name])],
+      (v) => {
+        chooseTheme(v);
+        renderGroups();
+      }
+    ),
     selectRow(t('Language'), prefs.lang, [['auto', t('Automatic')], ...Object.entries(LANGUAGES)], (v) => {
       prefs.lang = v;
       savePrefs();

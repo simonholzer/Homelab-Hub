@@ -30,6 +30,18 @@ settings:
   # Language for browsers that have not chosen one in the gear menu: auto (the browser's), en, de.
   # language: auto
 
+# Themes of your own, chosen in the gear menu (Appearance -> Theme) next to the built-in ones.
+# Each starts from a built-in theme (base: dark, light, catppuccin, nord, gruvbox, high-contrast)
+# and changes only the colors it names: bg, panel, panelHover, border, borderStrong, text, muted,
+# accent, onAccent, up, down, warn, unknown, track, shadow. Put "#..." colors in quotes.
+# themes:
+#   purple-night:
+#     name: Purple night
+#     base: dark
+#     accent: "#b48eff"
+#     bg: "#0d0b14"
+#     panel: "#151221"
+
 # Address shortcuts. Use them as {nas} / {pi} in url: and check: below.
 # Moving a machine to a new IP = change one line here.
 hosts:

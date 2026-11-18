@@ -365,3 +365,32 @@ body.cfg-dragging, body.cfg-dragging * { cursor: grabbing !important; user-selec
   .cfg-grip { width: 34px; height: 44px; }
   .cfg-machine { padding: 10px; }
 }
+
+/* ---- themes ---- */
+.cfg-themehead { display: flex; align-items: center; gap: 8px; }
+.cfg-themehead .cfg-in { flex: 1; }
+.cfg-themetop { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 14px; align-items: start; }
+.cfg-color { display: flex; align-items: center; gap: 6px; }
+.cfg-color .cfg-in { flex: 1; min-width: 0; }
+.cfg-swatch { flex: none; width: 34px; height: 32px; padding: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg); cursor: pointer; }
+.cfg-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.cfg-swatch::-webkit-color-swatch { border: none; border-radius: 5px; }
+.cfg-swatch::-moz-color-swatch { border: none; border-radius: 5px; }
+/* the small picture of a theme: its colors are set on the box itself */
+.cfg-tprev { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg); color: var(--text); }
+.cfg-tprev-card { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 4px 12px var(--shadow); font-size: 0.8rem; }
+.cfg-tprev-card.hover { background: var(--panel-hover); border-color: var(--border-strong); }
+.cfg-tprev-title { font-weight: 650; }
+.cfg-tprev-muted { flex: 1; color: var(--muted); }
+.cfg-tprev-dots { display: flex; gap: 4px; }
+.cfg-tprev-dots i { width: 8px; height: 8px; border-radius: 50%; }
+.cfg-tprev-dots .up { background: var(--up); }
+.cfg-tprev-dots .down { background: var(--down); }
+.cfg-tprev-dots .warn { background: var(--warn); }
+.cfg-tprev-dots .unknown { background: var(--unknown); }
+.cfg-tprev-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.cfg-tprev-bar i { display: block; width: 62%; height: 100%; background: var(--accent); }
+.cfg-tprev-btn { padding: 2px 9px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+@media (max-width: 760px) {
+  .cfg-themetop { grid-template-columns: minmax(0, 1fr); }
+}

@@ -25,7 +25,7 @@ Everything is configured in **one YAML file**, which you can also edit on the pa
 - **Optional password login**, set on the page, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
 - **Plain links** next to the checked services: bookmarks with an optional description line
 - **Works on a phone** and can be installed as an app (home screen, own window)
-- Dark and light theme, English and German
+- Dark, light, Catppuccin, Nord, Gruvbox and high-contrast themes, plus themes of your own; English and German
 - Node.js, one dependency (`yaml`), no build step, no database; images for amd64 and arm64 (Raspberry Pi)
 
 ## Quick start (Docker)
@@ -284,10 +284,35 @@ The fix is always the same: point `check:` at the service itself (server IP and 
 
 ## Appearance and language
 
-Gear menu → *Appearance*: theme (automatic / dark / light) and language (automatic / English / Deutsch), remembered per
-browser. `settings.language: de` in the YAML sets the default for everyone who has not chosen.
+Gear menu → *Appearance*: theme and language (automatic / English / Deutsch), remembered per browser. Themes: automatic
+(follows the system), dark, light, [Catppuccin Mocha](https://catppuccin.com), [Nord](https://www.nordtheme.com),
+[Gruvbox](https://github.com/morhetz/gruvbox) and high contrast. `settings.language: de` in the YAML sets the default for everyone who has not chosen.
 Texts that come from the server (config problems, some check details) are English.
 Another language is one block in [public/i18n.js](public/i18n.js); see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Themes of your own
+
+Gear menu → *Edit services and settings* → *Themes*: add a theme, pick the theme it starts from, and change colors
+with the color picker. A small preview shows the result; *Try on the page* shows it on the whole page until you
+close the editor. After saving, the theme is in everyone's theme list.
+
+In the YAML they live under `themes:`. A theme starts from a built-in one (`base:`, default `dark`) and changes only
+the colors it names:
+
+```yaml
+themes:
+  purple-night:
+    name: Purple night          # shown in the menu (default: the key)
+    base: dark                  # dark, light, catppuccin, nord, gruvbox or high-contrast
+    accent: "#b48eff"
+    bg: "#0d0b14"
+    panel: "#151221"
+```
+
+Colors: `bg`, `panel`, `panelHover`, `border`, `borderStrong`, `text`, `muted`, `accent`, `onAccent` (text on accent
+buttons), `up`, `down`, `warn`, `unknown` (the status dots), `track` (bar backgrounds), `shadow`. A color is `"#rgb"`,
+`"#rrggbb"` (with alpha too), `rgb(...)` or `hsl(...)`; put `#` colors in quotes, YAML reads `#` as a comment otherwise.
+A theme of your own can't be called like a built-in one. To share one, post its YAML block.
 
 ## On a phone, and as an app
 
