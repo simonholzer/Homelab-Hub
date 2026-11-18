@@ -17,6 +17,12 @@ different themes.
 | Gruvbox | Warm, retro browns and yellows ([gruvbox](https://github.com/morhetz/gruvbox), MIT) |
 | High contrast | Black and white with strong lines; online / offline in blue / orange, which most colour-blind eyes tell apart |
 
+| Dark | Light | Catppuccin Mocha |
+|---|---|---|
+| ![Dark](screenshot.png) | ![Light](screenshot-light.png) | ![Catppuccin Mocha](screenshot-catppuccin.png) |
+| **Nord** | **Gruvbox** | **High contrast** |
+| ![Nord](screenshot-nord.png) | ![Gruvbox](screenshot-gruvbox.png) | ![High contrast](screenshot-high-contrast.png) |
+
 Themes of your own (below) appear in the same list, for everyone who opens the hub.
 
 ## Making a theme in the editor

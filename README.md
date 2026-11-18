@@ -7,9 +7,17 @@ Everything is configured in **one YAML file**, which you can also edit on the pa
 ![Homelab Hub with demo data](docs/screenshot.png)
 
 <details>
-<summary>Light theme</summary>
+<summary>The other built-in themes</summary>
 
-![Homelab Hub, light theme](docs/screenshot-light.png)
+| Light | Catppuccin Mocha |
+|---|---|
+| ![Homelab Hub, light theme](docs/screenshot-light.png) | ![Homelab Hub, Catppuccin Mocha theme](docs/screenshot-catppuccin.png) |
+| **Nord** | **Gruvbox** |
+| ![Homelab Hub, Nord theme](docs/screenshot-nord.png) | ![Homelab Hub, Gruvbox theme](docs/screenshot-gruvbox.png) |
+| **High contrast** | |
+| ![Homelab Hub, high contrast theme](docs/screenshot-high-contrast.png) | |
+
+More about themes, and how to make your own: [docs/themes.md](docs/themes.md).
 
 </details>
 
