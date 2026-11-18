@@ -543,9 +543,10 @@ body.compact .cardwrap:not(:hover) .pin:not(.on) { opacity: 0; }
 
 .problem { color: var(--down); font-size: 0.78rem; margin-top: -4px; }
 
-/* widget: a few values from the service's own API, side by side under the name */
+/* widget: a few values from the service's own API, side by side under the name. A box is never narrower than its
+   value: when they don't fit, they wrap onto a second line (only a very long text value is cut, with …) */
 .widget { display: flex; flex-wrap: wrap; gap: 6px; }
-.widget .wf { flex: 1 1 0; min-width: 64px; display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.widget .wf { flex: 1 0 auto; min-width: min(64px, 100%); max-width: 100%; display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--text) 5%, transparent); }
 .widget .wv { font-weight: 650; font-size: 0.95rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .widget .wl { color: var(--muted); font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .widget .wf.bad .wv { color: var(--warn); }

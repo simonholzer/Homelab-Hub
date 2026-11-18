@@ -2,6 +2,13 @@
 
 Every released version, newest first. The Docker image of a version is `ghcr.io/simonholzer/homelab-hub:<version>`.
 
+## 1.7.1
+
+- **Widget values were cut off** ("5,1…" instead of "5,186") when a card or tile was just too narrow for its values
+  side by side. A value now keeps its full width; when they don't fit, they move onto a second line.
+
+Updating needs no changes.
+
 ## 1.7.0
 
 - **Widgets.** A card can show a few values from the service's own API: photos in Immich, streams in Jellyfin,
