@@ -515,7 +515,28 @@ function togglePin(key) {
   renderGroups();
 }
 
+/**
+ * A widget tile: only a widget's values, under a small heading. A click opens the service when the tile has an
+ * address. `groupName` null = a tile of the widget row at the top.
+ */
+function tileCard(svc, groupName) {
+  const href = svc.url || svc.localUrl ? linkFor(svc) : null;
+  const top = h('div', { class: 'row' }, svc.icon ? iconFor(svc.icon) : null, h('span', { class: 'name', text: svc.name }));
+  const values = widgetBox(svc.widget) ?? h('div', { class: 'widget bad', text: t('No values yet') });
+  const a = href
+    ? h('a', { class: 'card wtile', href, target: prefs.newTab ? '_blank' : null, rel: 'noopener noreferrer' }, top, values)
+    : h('div', { class: 'card wtile' }, top, values);
+  let edit = null;
+  if (data?.editor) {
+    edit = h('button', { type: 'button', class: 'pin edit', 'aria-label': t('Edit {name}', { name: svc.name }), title: t('Edit') });
+    edit.innerHTML = PENCIL; // fixed markup, no config text
+    edit.addEventListener('click', () => openEditor(groupName == null ? { section: 'cfg-tiles', tile: svc.name } : { group: groupName, service: svc.name }));
+  }
+  return h('div', { class: `cardwrap tilewrap${edit ? ' editable' : ''}` }, a, edit);
+}
+
 function card(svc, groupName) {
+  if (svc.tile) return tileCard(svc, groupName);
   const plain = svc.status === 'none'; // a plain link (check: none): no dot
   const status = plain ? 'none' : svc.status in STATUS_LABEL ? svc.status : 'unknown';
   const pillTitle = [t(svc.detail), svc.ms != null ? `${svc.ms} ms` : ''].filter(Boolean).join(' · ');
@@ -583,7 +604,9 @@ const GROUP_LABEL = { up: 'All online', down: 'Offline', partial: 'Some offline'
 function groupCount(g, up) {
   const checked = g.services.filter((s) => s.status !== 'none').length;
   if (checked > 0) return t('{n} of {m} online', { n: up, m: checked });
-  return g.services.length === 1 ? t('1 link') : t('{n} links', { n: g.services.length });
+  const links = g.services.filter((s) => !s.tile).length;
+  if (links === 0) return g.services.length === 1 ? t('1 widget') : t('{n} widgets', { n: g.services.length });
+  return links === 1 ? t('1 link') : t('{n} links', { n: links });
 }
 
 function groupState(g) {
@@ -611,6 +634,15 @@ function renderGroups() {
       if (s && matches(s, g)) pinned.push({ s, g });
     }
   }
+  // the widget row: tiles of their own at the top
+  const tiles = (data?.tiles ?? []).filter((s) => !q || `${s.name}`.toLowerCase().includes(q));
+  if (tiles.length > 0) {
+    shown += tiles.length;
+    const cards = h('div', { class: 'cards tiles' });
+    for (const s of tiles) cards.append(tileCard(s, null));
+    els.groups.append(h('section', { class: 'group tilerow' }, h('h2', { text: t('Widgets') }), cards));
+  }
+
   if (pinned.length > 0 && prefs.pinned) {
     const cards = h('div', { class: 'cards' });
     for (const { s, g } of pinned) cards.append(card(s, g.name));
@@ -650,7 +682,7 @@ function renderGroups() {
     els.groups.append(section);
   }
   els.empty.hidden = shown > 0 || !data;
-  const none = (data?.groups ?? []).every((g) => g.services.length === 0);
+  const none = (data?.groups ?? []).every((g) => g.services.length === 0) && !(data?.tiles ?? []).length;
   els.empty.textContent = !none
     ? t('Nothing matches your filter.')
     : data?.editor

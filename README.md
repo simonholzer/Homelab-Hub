@@ -20,7 +20,7 @@ Everything is configured in **one YAML file**, which you can also edit on the pa
 - **Everything is edited on the page**: a form with drag and drop, or the YAML with color coding; a broken config never takes the page down
 - **Finds your services** in Docker, and **imports** from Homepage, Dashy and Homarr
 - **Icons by name** from [dashboard-icons](https://github.com/homarr-labs/dashboard-icons)
-- **Widgets**: a few values from a service's own API on its card (photos in Immich, streams in Jellyfin …), made, tested and shared in the editor
+- **Widgets**: a few values from a service's own API (photos in Immich, streams in Jellyfin …) on its card or on a tile of their own; ready-made for well-known services, or made, tested and shared in the editor
 - **Themes**: dark, light, Catppuccin, Nord, Gruvbox, high contrast, and your own, made and shared in the editor
 - **Optional password login**, or put it behind Cloudflare Access, Authelia, Authentik, a VPN …
 - **Works on a phone** and can be installed as an app; English and German

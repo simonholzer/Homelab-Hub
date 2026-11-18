@@ -153,16 +153,22 @@ stats:
       disks:
         - { name: SD card, path: "${disk}", size: ${Math.round(freeGb * 1.7)}G }
 
+# the widget row at the top: tiles that show only a widget's values
+tiles:
+  - { name: Photos, icon: immich, local: "http://{nas}:2283", widget: immich }
+  - { name: Containers, icon: portainer, local: "https://{nas}:9443", widget: portainer }
+
 groups:
   - name: NAS
     autoContainers: true
     services:
       - { name: TrueNAS, icon: truenas, url: "https://nas.example.com", local: "http://{nas}", check: "${up}" }
-      - { name: Immich, icon: immich, url: "https://photos.example.com", local: "http://{nas}:2283", check: "${up}", widget: immich }
+      - { name: Immich, icon: immich, url: "https://photos.example.com", local: "http://{nas}:2283", check: "${up}" }
       - { name: Jellyfin, icon: jellyfin, url: "https://media.example.com", local: "http://{nas}:8096", check: "${up}", widget: jellyfin }
       - { name: n8n, icon: n8n, url: "https://n8n.example.com", local: "http://{nas}:5678", check: "${up}" }
       - { name: Homarr, icon: homarr, url: "https://homarr.example.com", local: "http://{nas}:7575", check: "${up}" }
-      - { name: Portainer, icon: portainer, local: "https://{nas}:9443", check: "${up}", widget: portainer }
+      - { name: Portainer, icon: portainer, local: "https://{nas}:9443", check: "${up}" }
+      - { type: widget, name: Streams, icon: jellyfin, local: "http://{nas}:8096", widget: jellyfin }
       - { name: Syncthing, icon: syncthing, local: "http://{nas}:8384", check: "${up}" }
       - { name: Uptime Kuma, icon: uptime-kuma, local: "http://{nas}:3001", check: "${up}" }
   - name: Raspberry Pi

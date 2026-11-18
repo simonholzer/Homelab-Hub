@@ -69,6 +69,7 @@ groups:
 | `insecure` | `true` accepts a self-signed certificate on the check (Cockpit, Portainer) |
 | `containers` | Patterns (`*` wildcard) matched against container name, compose project or service name |
 | `widget` | A widget from `widgets.yaml`: values from the service's API on the card, see [widgets.md](widgets.md) |
+| `type` | `widget` makes the entry a widget tile (only a widget's values), see [widgets.md](widgets.md#on-a-card-or-on-a-tile-of-its-own) |
 | `hidden` | `true` keeps the entry but hides it |
 | `hosts` | Aliases usable as `{name}` in `url`, `local` and `check` |
 

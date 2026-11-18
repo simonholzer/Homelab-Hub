@@ -6,6 +6,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { parseDocument, isMap, isSeq, isScalar } from 'yaml';
 import { parseConfigText, normalizeConfig } from './config.js';
+import { templatesForEditor } from './widget-templates.js';
 import { normalizeWidgets, parseWidgetsText, resolveWidget, requestJson, readFields, widgetRef, WIDGETS_STARTER } from './widgets.js';
 
 /** Items of a list carry their position in the original file under this key, so a renamed or moved
@@ -338,6 +339,10 @@ export function createConfigApi({ getFile, getIcons = () => ({}), onSaved = () =
         // a widgets.yaml that isn't there yet starts with the explaining comments; saving creates it
         if (kind === 'widgets' && !text) info.version = versionOf('');
         return json(res, 200, { ...info, kind, file, writable: isWritable(file), icons: getIcons() });
+      }
+      // ready-made widgets for known services, and whether their key is set here (never the key itself)
+      if (pathname === '/api/config/widget-templates' && (req.method === 'GET' || req.method === 'HEAD')) {
+        return json(res, 200, { templates: templatesForEditor(env) });
       }
       if (pathname === '/api/config/widget-test' && req.method === 'POST') {
         if (!fromOwnPage(req)) return json(res, 403, { error: 'Changes are only accepted from the hub page itself.' });

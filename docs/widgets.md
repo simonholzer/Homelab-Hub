@@ -6,6 +6,48 @@ streaming from Jellyfin, how many containers Portainer runs. You describe the wi
 Widgets live in their own file, **`widgets.yaml`**, next to the config (`/config/widgets.yaml` in Docker), so the
 config stays readable. The file is made the first time you save a widget in the editor; you can also write it by hand.
 
+## Ready-made widgets
+
+The hub knows widgets for Immich, Jellyfin, Portainer, Sonarr, Radarr, Lidarr, Prowlarr, Jellyseerr/Overseerr,
+Home Assistant, Paperless-ngx, Nextcloud, Syncthing and Proxmox VE. When a card looks like one of them (its icon,
+name or container patterns), the editor offers the widget: in the card under *Widget*, and on the Widgets page under
+*Ready-made widgets*. One click copies it into `widgets.yaml`; then only the key is missing, which the editor names
+(for example `IMMICH_API_KEY`) and says whether it is already set on the hub. After that it is an ordinary widget
+you can change. New ones go into [src/widget-templates.js](../src/widget-templates.js).
+
+## On a card, or on a tile of its own
+
+A widget can be shown in two ways:
+
+- **On a card:** the values sit under the card's name (`widget:` on the card).
+- **On a widget tile:** a tile with only the values and a small heading, no online dot. Tiles go into any group, next
+  to the cards (`type: widget`), or into the **widget row** at the top of the page, above the groups (`tiles:`).
+
+```yaml
+tiles:                                    # the widget row at the top
+  - name: Photos
+    icon: immich
+    local: http://{nas}:2283              # where the widget asks; a click on the tile opens it
+    widget: immich
+
+groups:
+  - name: NAS
+    services:
+      - name: Jellyfin
+        local: http://{nas}:8096
+        widget: jellyfin                  # on the card
+      - type: widget                      # a tile in the group
+        name: Streams
+        local: http://{nas}:8096
+        widget: jellyfin
+```
+
+A tile's `name` is optional (default: the widget's name), and so are `url` and `local` when the widget has a full
+`url:` of its own. In the editor, *Add widget tile* adds one to a group or the widget row, *As its own tile* turns a
+ready-made widget into a tile next to its card, and *Move to its own tile* takes a card's widget off the card onto a
+tile. Tiles are moved with their handle like cards, between groups and into or out of the widget row (only tiles go
+into the widget row).
+
 ## Making one in the editor
 
 1. Gear menu → **Edit services and settings** → **Widgets** → **Add widget**.

@@ -302,3 +302,68 @@ test('the example widgets.yaml is valid', () => {
   assert.deepEqual(errors, []);
   assert.ok(Object.keys(widgets).length >= 3);
 });
+
+test('ready-made widgets: each is valid, and cards find theirs by icon, name or containers', async () => {
+  const { WIDGET_TEMPLATES, templateFor, templatesForEditor } = await import('../src/widget-templates.js');
+  for (const tpl of WIDGET_TEMPLATES) {
+    assert.deepEqual(normalizeWidgets({ [tpl.id]: tpl.widget }).errors, [], tpl.id);
+    assert.ok(JSON.stringify(tpl.widget).includes(`{env:${tpl.env}}`), `${tpl.id} uses its key`);
+  }
+  assert.equal(templateFor({ icon: 'immich', name: 'Photos' }).id, 'immich');
+  assert.equal(templateFor({ name: 'Home Assistant' }).id, 'home-assistant');
+  assert.equal(templateFor({ name: 'Media', containers: ['*jellyfin*'] }).id, 'jellyfin');
+  assert.equal(templateFor({ name: 'Router' }), null);
+  const listed = templatesForEditor({ IMMICH_API_KEY: 'k' });
+  assert.equal(listed.find((t) => t.id === 'immich').keySet, true);
+  assert.equal(listed.find((t) => t.id === 'jellyfin').keySet, false);
+  assert.doesNotMatch(JSON.stringify(listed), /"k"/, 'never the key itself');
+});
+
+test('widget tiles: in a group (type: widget) and in the widget row (tiles:)', () => {
+  const { widgets } = normalizeWidgets({ immich: { name: 'Immich stats', path: '/api', fields: [{ value: 'photos' }] } });
+  const raw = {
+    hosts: { nas: '10.0.0.2' },
+    tiles: [{ widget: 'immich', local: 'http://{nas}:2283' }, { name: 'Off', widget: 'immich', hidden: true }],
+    groups: [{ name: 'NAS', services: [{ name: 'Immich', url: 'https://p.example.com' }, { type: 'widget', name: 'Photos', widget: 'immich', url: 'https://p.example.com' }] }]
+  };
+  const { config, errors } = normalizeConfig(raw, { widgets });
+  assert.deepEqual(errors, []);
+  assert.equal(config.tiles.length, 1);
+  assert.equal(config.tiles[0].name, 'Immich stats', 'no name: the widget\'s');
+  assert.equal(config.tiles[0].tile, true);
+  assert.equal(config.tiles[0].widget.request.url, 'http://10.0.0.2:2283/api');
+  assert.equal(config.tiles[0].check, null);
+  const tile = config.groups[0].services[1];
+  assert.equal(tile.tile, true);
+  assert.equal(tile.widget.request.url, 'https://p.example.com/api');
+
+  const bad = normalizeConfig({ tiles: [{ name: 'X' }, { type: 'card', name: 'Y', widget: 'immich' }], groups: [{ name: 'G', services: [{ type: 'box', name: 'Z', url: 'http://z' }, { type: 'widget' }] }] }, { widgets });
+  const text = bad.errors.join('\n');
+  assert.match(text, /tiles\[0\] \(X\): a widget tile needs a widget/);
+  assert.match(text, /tiles\[1\]: only widget tiles go into the widget row/);
+  assert.match(text, /services\[0\]\.type: must be card/);
+  assert.match(text, /services\[1\]: a widget tile needs a widget/);
+});
+
+test('the monitor asks the widgets of tiles and the page gets them without a status dot', async () => {
+  const dir = tmpDir();
+  const file = path.join(dir, 'services.yaml');
+  fs.writeFileSync(file, 'tiles:\n  - { name: Top, widget: w, local: "http://10.0.0.2" }\ngroups:\n  - name: G\n    services:\n      - { type: widget, name: In group, widget: w, local: "http://10.0.0.3" }\n');
+  fs.writeFileSync(path.join(dir, 'widgets.yaml'), 'w:\n  path: /api\n  fields: [{ label: N, value: n }]\n');
+  const asked = [];
+  const m = new Monitor({ configPath: file, check: async () => ({ status: 'up' }), statsReader: { read: async () => null }, widget: async (w) => (asked.push(w.request.url), { fields: [{ label: 'N', value: 1 }] }) });
+  try {
+    await m.tick();
+    const snap = m.snapshot();
+    assert.equal(snap.configError, null);
+    assert.deepEqual(asked.sort(), ['http://10.0.0.2/api', 'http://10.0.0.3/api']);
+    assert.equal(snap.tiles[0].name, 'Top');
+    assert.equal(snap.tiles[0].tile, true);
+    assert.equal(snap.tiles[0].status, 'none');
+    assert.equal(snap.tiles[0].widget.fields[0].value, 1);
+    assert.equal(snap.groups[0].services[0].tile, true);
+    assert.equal(snap.summary.total, 0, 'tiles are not counted as online or offline');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

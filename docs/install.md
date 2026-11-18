@@ -88,7 +88,7 @@ containers every `checkIntervalSeconds` (default 30 s).
 | Path | What |
 |---|---|
 | `config/services.yaml`, `config/starter.yaml`, `config/widgets.yaml` | Full example config; the small one a new install starts with; example widgets |
-| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `scan.js` (finding agents), `discover.js` (found on this server), `import.js`, `update.js`, `icons.js`, `editor.js` (config editor API), `widgets.js` (values from a service's API) |
+| `src/` | `server.js` (HTTP), `monitor.js` (timer + snapshot), `config.js`, `checks.js`, `docker.js`, `stats.js`, `network.js` (home detection), `auth.js` (login), `agent.js` (stats from other machines), `scan.js` (finding agents), `discover.js` (found on this server), `import.js`, `update.js`, `icons.js`, `editor.js` (config editor API), `widgets.js` (values from a service's API), `widget-templates.js` (ready-made widgets) |
 | `public/` | The page: `index.html`, `app.js`, `style.css`, `i18n.js` (translations), `theme.js`, the login page, the config editor, `manifest.webmanifest` and app icons, `icons/` |
 | `test/` | `node --test` suites, with fake servers and `/proc` fixtures |
 | `docs/` | These pages and the screenshots |

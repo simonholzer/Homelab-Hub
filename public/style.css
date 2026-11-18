@@ -549,6 +549,17 @@ body.compact .cardwrap:not(:hover) .pin:not(.on) { opacity: 0; }
 .widget .wv { font-weight: 650; font-size: 0.95rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .widget .wl { color: var(--muted); font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .widget .wf.bad .wv { color: var(--warn); }
+/* a widget tile: the values are the card */
+.card.wtile { gap: 10px; }
+.card.wtile .row { gap: 10px; }
+.card.wtile .icon { width: 22px; height: 22px; }
+.card.wtile .name { font-size: 0.82rem; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+.card.wtile .widget .wf { padding: 8px 10px; }
+.card.wtile .widget .wv { font-size: 1.25rem; }
+.card.wtile .widget.bad { margin-top: 0; white-space: normal; }
+.tilewrap .pin.edit { right: 8px; top: 10px; bottom: auto; }
+.tilewrap.editable .card .row { padding-right: 26px; }
+.tilerow h2 { color: var(--muted); }
 .widget.bad { color: var(--warn); font-size: 0.76rem; margin-top: -4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { color: var(--accent); font-size: 0.72rem; font-weight: 600; margin-top: -4px; }
 /* home-only card while away: the name and icon are dimmed, the online/offline state stays clear */
