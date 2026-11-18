@@ -2,7 +2,7 @@
 
 Every released version, newest first. The Docker image of a version is `ghcr.io/simonholzer/homelab-hub:<version>`.
 
-## Unreleased
+## 1.7.0
 
 - **Widgets.** A card can show a few values from the service's own API: photos in Immich, streams in Jellyfin,
   containers in Portainer … Widgets are kept in their own file, `widgets.yaml` next to the config, so the config stays

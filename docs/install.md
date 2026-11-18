@@ -7,7 +7,7 @@ For TrueNAS, see [DEPLOY.md](../DEPLOY.md).
 ## Versions and updates
 
 `compose.yaml` uses the tag `latest`, which follows the newest state of the project. To stay on a version until you
-decide to move, write it instead, e.g. `ghcr.io/simonholzer/homelab-hub:1.6.0` (also `:1.6` for the newest 1.6.x and
+decide to move, write it instead, e.g. `ghcr.io/simonholzer/homelab-hub:1.7.0` (also `:1.7` for the newest 1.7.x and
 `:1` for the newest 1.x). All versions and what changed are under
 [Releases](https://github.com/simonholzer/Homelab-Hub/releases) and in [CHANGELOG.md](../CHANGELOG.md). To update:
 
