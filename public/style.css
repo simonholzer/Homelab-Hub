@@ -558,7 +558,13 @@ body.compact .cardwrap:not(:hover) .pin:not(.on) { opacity: 0; }
 .card.wtile .widget .wv { font-size: 1.25rem; }
 .card.wtile .widget.bad { margin-top: 0; white-space: normal; }
 .tilewrap .pin.edit { right: 8px; top: 10px; bottom: auto; }
-.tilewrap.editable .card .row { padding-right: 26px; }
+/* the eye that hides a widget: top right of a tile (left of the pencil), next to the pin on a card */
+.pin.eye svg { transform: none; }
+.tilewrap .pin.eye { right: 8px; top: 10px; bottom: auto; }
+.tilewrap.editable .pin.eye { right: 36px; }
+.cardwrap.haswidget > .pin.eye { right: 66px; }
+.cardwrap.haswidget:not(.editable) > .pin.eye { right: 38px; }
+.tilewrap.editable .card .row { padding-right: 56px; }
 .tilerow h2 { color: var(--muted); }
 .widget.bad { color: var(--warn); font-size: 0.76rem; margin-top: -4px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { color: var(--accent); font-size: 0.72rem; font-weight: 600; margin-top: -4px; }
@@ -666,3 +672,6 @@ body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-are
   .card { transition: none; }
   .pill.pending::before { animation: none; }
 }
+.cardwrap.haswidget.editable .card .meta { padding-right: 86px; }
+.cardwrap.haswidget:not(.editable) .card .meta { padding-right: 56px; }
+body.compact .cardwrap:not(.tilewrap) > .pin.eye { display: none; }

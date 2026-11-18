@@ -519,8 +519,8 @@ const de = {
   'No values yet': 'Noch keine Werte',
   '1 widget': '1 Widget',
   '{n} widgets': '{n} Widgets',
-  'The cards on the page, in their groups. Click a service to edit it; drag the handle to move it, also into another group. Widget tiles move the same way, also into the widget row at the top.':
-    'Die Karten auf der Seite, in ihren Gruppen. Klicke einen Dienst an, um ihn zu bearbeiten; ziehe am Griff, um ihn zu verschieben, auch in eine andere Gruppe. Widget-Kacheln verschiebst du genauso, auch in die Widget-Reihe oben.',
+  'The cards on the page, in their groups. Click a service to edit it; drag the handle to move it, also into another group. Widget rows are groups too: move them like the others, and drag widget tiles into and out of them.':
+    'Die Karten auf der Seite, in ihren Gruppen. Klicke einen Dienst an, um ihn zu bearbeiten; ziehe am Griff, um ihn zu verschieben, auch in eine andere Gruppe. Widget-Reihen sind auch Gruppen: verschiebe sie wie die anderen, und ziehe Widget-Kacheln hinein und heraus.',
   'Widget row': 'Widget-Reihe',
   'At the top of the page, above the groups': 'Oben auf der Seite, über den Gruppen',
   'No tiles here yet. Add one, or drag a widget tile up here from a group.': 'Noch keine Kacheln hier. Füge eine hinzu oder ziehe eine Widget-Kachel aus einer Gruppe hierher.',
@@ -551,6 +551,36 @@ const de = {
   '{env} is set': '{env} ist gesetzt',
   'needs {env}': 'braucht {env}',
   '{n} cards or tiles use this widget. Remove it from them too? (Tiles that show it are removed.)': '{n} Karten oder Kacheln verwenden dieses Widget. Auch bei ihnen entfernen? (Kacheln, die es zeigen, werden entfernt.)',
+  // hiding widgets, widget rows, browser settings in the editor
+  'Hidden widgets': 'Ausgeblendete Widgets',
+  'All widgets': 'Alle Widgets',
+  'Hide the widget of {name}': 'Widget von {name} ausblenden',
+  'Hide this widget (the gear menu shows it again)': 'Dieses Widget ausblenden (im Zahnrad-Menü wieder einblenden)',
+  '{name} (widget tile)': '{name} (Widget-Kachel)',
+  '{name} (widget on the card)': '{name} (Widget auf der Karte)',
+  'Refresh, theme and language: Edit services and settings → Settings.': 'Aktualisierung, Farbschema und Sprache: Dienste und Einstellungen bearbeiten → Einstellungen.',
+  'This browser': 'Dieser Browser',
+  'How this browser shows the page. Applied at once and kept in this browser only; nothing here is saved to the config.':
+    'Wie dieser Browser die Seite zeigt. Gilt sofort und bleibt nur in diesem Browser; nichts davon wird in der Konfiguration gespeichert.',
+  'The hub measures CPU, memory, network and storage every {stats} s and re-checks services and containers every {checks} s (set below, under Timing).':
+    'Der Hub misst CPU, Arbeitsspeicher, Netzwerk und Speicher alle {stats} s und prüft Dienste und Container alle {checks} s neu (weiter unten unter Zeitplan einstellbar).',
+  "Automatic: the browser's language, or the one set below.": 'Automatisch: die Sprache des Browsers oder die weiter unten eingestellte.',
+  'Widget rows are groups too: move them like the others, and drag widget tiles into and out of them.': 'Widget-Reihen sind auch Gruppen: verschiebe sie wie die anderen, und ziehe Widget-Kacheln hinein und heraus.',
+  'Add widget row': 'Widget-Reihe hinzufügen',
+  'Add a widget…': 'Ein Widget hinzufügen…',
+  'Add a widget tile…': 'Eine Widget-Kachel hinzufügen…',
+  'Make a widget on the Widgets page first.': 'Erstelle zuerst ein Widget auf der Seite Widgets.',
+  'No widgets in this row yet. Add one, or drag a widget tile here.': 'Noch keine Widgets in dieser Reihe. Füge eines hinzu oder ziehe eine Widget-Kachel hierher.',
+  'A widget row: only widget tiles. Widgets are made and changed on the Widgets page; here they are only added and moved.':
+    'Eine Widget-Reihe: nur Widget-Kacheln. Widgets werden auf der Seite Widgets erstellt und geändert; hier werden sie nur hinzugefügt und verschoben.',
+  'Pick a widget': 'Widget auswählen',
+  'The tile shows this widget: its heading, icon and address are set on the Widgets page.': 'Die Kachel zeigt dieses Widget: Überschrift, Symbol und Adresse werden auf der Seite Widgets eingestellt.',
+  'Shows a few values from the service\'s own API on the card, e.g. how many photos Immich keeps. Widgets are made and changed on the Widgets page.':
+    'Zeigt ein paar Werte aus der eigenen API des Dienstes auf der Karte, z. B. wie viele Fotos Immich speichert. Widgets werden auf der Seite Widgets erstellt und geändert.',
+  'Also the heading of its tiles.': 'Auch die Überschrift seiner Kacheln.',
+  'Address for tiles': 'Adresse für Kacheln',
+  'A card asks the path on its own address; a widget tile asks it here (a click on the tile opens it too).': 'Eine Karte fragt den Pfad auf ihrer eigenen Adresse ab; eine Widget-Kachel hier (ein Klick auf die Kachel öffnet sie auch).',
+  'Its address for tiles': 'Seine Adresse für Kacheln',
   // widget answers from the hub (in English)
   'HTTP 401: the API key or login was not accepted': 'HTTP 401: Der API-Schlüssel oder die Anmeldung wurde nicht angenommen',
   'HTTP 403: the API key or login was not accepted': 'HTTP 403: Der API-Schlüssel oder die Anmeldung wurde nicht angenommen',

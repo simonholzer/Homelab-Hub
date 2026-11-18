@@ -35,7 +35,7 @@ try {
 }
 
 // What the page shows: chosen in the gear menu, remembered in this browser.
-const prefs = { health: true, widgets: true, stats: true, pinned: true, newTab: true, compact: false, hiddenGroups: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', customTheme: null, lang: 'auto' };
+const prefs = { health: true, widgets: true, stats: true, pinned: true, newTab: true, compact: false, hiddenGroups: [], hiddenWidgets: [], refreshSeconds: DEFAULT_REFRESH_SECONDS, theme: 'auto', customTheme: null, lang: 'auto' };
 // the built-in themes come from theme.js; themes of your own (themes: in the YAML) from the server
 const BUILTIN_THEMES = window.hubTheme?.BUILTIN ?? [{ id: 'dark', name: 'Dark' }, { id: 'light', name: 'Light' }];
 const isBuiltinTheme = (id) => id === 'auto' || BUILTIN_THEMES.some((b) => b.id === id);
@@ -49,6 +49,7 @@ try {
   for (const key of ['health', 'widgets', 'stats', 'pinned', 'newTab', 'compact']) if (typeof saved[key] === 'boolean') prefs[key] = saved[key];
   prefs.refreshSeconds = validRefresh(saved.refreshSeconds) ?? DEFAULT_REFRESH_SECONDS;
   if (Array.isArray(saved.hiddenGroups)) prefs.hiddenGroups = saved.hiddenGroups.filter((n) => typeof n === 'string');
+  if (Array.isArray(saved.hiddenWidgets)) prefs.hiddenWidgets = saved.hiddenWidgets.filter((n) => typeof n === 'string');
   if (typeof saved.theme === 'string' && /^[a-z0-9][a-z0-9_-]*$/i.test(saved.theme)) prefs.theme = saved.theme;
   if (saved.customTheme && typeof saved.customTheme === 'object' && saved.customTheme.id === prefs.theme) prefs.customTheme = saved.customTheme;
   if (saved.lang === 'auto' || Object.hasOwn(LANGUAGES, saved.lang)) prefs.lang = saved.lang;
@@ -519,6 +520,25 @@ function togglePin(key) {
  * A widget tile: only a widget's values, under a small heading. A click opens the service when the tile has an
  * address. `groupName` null = a tile of the widget row at the top.
  */
+const EYE_OFF = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M3 3l18 18M10.6 6.1A10.6 10.6 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-3 3.6M6.3 7.6A16.6 16.6 0 0 0 2.5 12s3.5 6 9.5 6a9.6 9.6 0 0 0 4.2-1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+/** Which widget this is, for hiding it in this browser: the tile, or the values on a card. */
+const widgetKey = (groupName, svc) => `${svc.tile ? 'tile' : 'card'}:${groupName}/${svc.name}`;
+const widgetHidden = (groupName, svc) => !prefs.widgets || prefs.hiddenWidgets.includes(widgetKey(groupName, svc));
+function hideWidget(groupName, svc) {
+  const key = widgetKey(groupName, svc);
+  if (!prefs.hiddenWidgets.includes(key)) prefs.hiddenWidgets = [...prefs.hiddenWidgets, key];
+  savePrefs();
+  renderGroups();
+  if (panelOpen()) renderSettings();
+}
+/** The little eye that hides one widget (in this browser; the gear menu shows it again). */
+function eyeButton(groupName, svc) {
+  const b = h('button', { type: 'button', class: 'pin eye', 'aria-label': t('Hide the widget of {name}', { name: svc.name }), title: t('Hide this widget (the gear menu shows it again)') });
+  b.innerHTML = EYE_OFF; // fixed markup, no config text
+  b.addEventListener('click', () => hideWidget(groupName, svc));
+  return b;
+}
+
 function tileCard(svc, groupName) {
   const href = svc.url || svc.localUrl ? linkFor(svc) : null;
   const top = h('div', { class: 'row' }, svc.icon ? iconFor(svc.icon) : null, h('span', { class: 'name', text: svc.name }));
@@ -530,13 +550,13 @@ function tileCard(svc, groupName) {
   if (data?.editor) {
     edit = h('button', { type: 'button', class: 'pin edit', 'aria-label': t('Edit {name}', { name: svc.name }), title: t('Edit') });
     edit.innerHTML = PENCIL; // fixed markup, no config text
-    edit.addEventListener('click', () => openEditor(groupName == null ? { section: 'cfg-tiles', tile: svc.name } : { group: groupName, service: svc.name }));
+    edit.addEventListener('click', () => openEditor(svc.widgetId ? { widget: svc.widgetId } : { group: groupName, service: svc.name }));
   }
-  return h('div', { class: `cardwrap tilewrap${edit ? ' editable' : ''}` }, a, edit);
+  return h('div', { class: `cardwrap tilewrap${edit ? ' editable' : ''}` }, a, edit, eyeButton(groupName, svc));
 }
 
 function card(svc, groupName) {
-  if (svc.tile) return tileCard(svc, groupName);
+  if (svc.tile) return widgetHidden(groupName, svc) ? null : tileCard(svc, groupName);
   const plain = svc.status === 'none'; // a plain link (check: none): no dot
   const status = plain ? 'none' : svc.status in STATUS_LABEL ? svc.status : 'unknown';
   const pillTitle = [t(svc.detail), svc.ms != null ? `${svc.ms} ms` : ''].filter(Boolean).join(' · ');
@@ -548,7 +568,8 @@ function card(svc, groupName) {
   const meta = h('div', { class: 'meta' }, h('span', { class: 'host', text: hostText }), healthBadge(svc));
   const body = [top];
   if (svc.description) body.push(h('div', { class: 'desc', text: svc.description }));
-  if (prefs.widgets) body.push(widgetBox(svc.widget));
+  const showWidget = svc.widget && !widgetHidden(groupName, svc);
+  if (showWidget) body.push(widgetBox(svc.widget));
   const cls = `card ${status}${href ? '' : ' homeonly'}`;
   const a = href
     ? h('a', { class: cls, href, target: prefs.newTab ? '_blank' : null, rel: 'noopener noreferrer' }, ...body)
@@ -576,7 +597,7 @@ function card(svc, groupName) {
     edit.innerHTML = PENCIL; // fixed markup, no config text
     edit.addEventListener('click', () => openEditor({ group: groupName, service: svc.name }));
   }
-  return h('div', { class: `cardwrap${edit ? ' editable' : ''}` }, a, edit, pin);
+  return h('div', { class: `cardwrap${edit ? ' editable' : ''}${showWidget ? ' haswidget' : ''}` }, a, edit, pin, showWidget ? eyeButton(groupName, svc) : null);
 }
 
 // ---- open / closed servers: remembered in this browser ----
@@ -634,24 +655,19 @@ function renderGroups() {
       if (s && matches(s, g)) pinned.push({ s, g });
     }
   }
-  // the widget row: tiles of their own at the top
-  const tiles = (data?.tiles ?? []).filter((s) => !q || `${s.name}`.toLowerCase().includes(q));
-  if (tiles.length > 0) {
-    shown += tiles.length;
-    const cards = h('div', { class: 'cards tiles' });
-    for (const s of tiles) cards.append(tileCard(s, null));
-    els.groups.append(h('section', { class: 'group tilerow' }, h('h2', { text: t('Widgets') }), cards));
-  }
-
   if (pinned.length > 0 && prefs.pinned) {
     const cards = h('div', { class: 'cards' });
-    for (const { s, g } of pinned) cards.append(card(s, g.name));
+    for (const { s, g } of pinned) {
+      const c = card(s, g.name);
+      if (c) cards.append(c);
+    }
     els.groups.append(h('section', { class: 'group pinned' }, h('h2', { text: t('Pinned') }), cards));
   }
 
   for (const g of data?.groups ?? []) {
     if (prefs.hiddenGroups.includes(g.name)) continue;
-    const list = g.services.filter((s) => matches(s, g));
+    const row = g.type === 'widgets'; // a widget row: tiles only, no online dot
+    const list = g.services.filter((s) => matches(s, g) && !(s.tile && widgetHidden(g.name, s)));
     if (list.length === 0) continue;
     shown += list.length;
     const { up, state } = groupState(g);
@@ -662,7 +678,7 @@ function renderGroups() {
       'button',
       { type: 'button', class: 'grouphead', 'aria-expanded': closed ? 'false' : 'true', title: closed ? t('Open') : t('Close') },
       h('span', { class: 'chev', 'aria-hidden': 'true', text: '▾' }),
-      h('span', { class: `gdot ${state}`, title: t(GROUP_LABEL[state]) }),
+      row ? null : h('span', { class: `gdot ${state}`, title: t(GROUP_LABEL[state]) }),
       h('span', { class: 'gname', text: g.name }),
       h('span', { class: 'gcount', text: groupCount(g, up) })
     );
@@ -673,16 +689,19 @@ function renderGroups() {
       editGroup.innerHTML = PENCIL; // fixed markup, no config text
       editGroup.addEventListener('click', () => openEditor({ group: g.name }));
     }
-    const section = h('section', { class: `group${closed ? ' closed' : ''}` }, h('h2', {}, head, editGroup));
+    const section = h('section', { class: `group${row ? ' tilerow' : ''}${closed ? ' closed' : ''}` }, h('h2', {}, head, editGroup));
     if (!closed) {
       const cards = h('div', { class: 'cards' });
-      for (const s of list) cards.append(card(s, g.name));
+      for (const s of list) {
+        const c = card(s, g.name);
+        if (c) cards.append(c);
+      }
       section.append(cards);
     }
     els.groups.append(section);
   }
   els.empty.hidden = shown > 0 || !data;
-  const none = (data?.groups ?? []).every((g) => g.services.length === 0) && !(data?.tiles ?? []).length;
+  const none = (data?.groups ?? []).every((g) => g.services.length === 0);
   els.empty.textContent = !none
     ? t('Nothing matches your filter.')
     : data?.editor
@@ -861,6 +880,7 @@ async function load() {
 // ---- gear menu: what to show ----
 const gear = $('gear');
 const panel = $('settings');
+const panelOpen = () => !panel.hidden;
 
 function toggleRow(label, checked, onChange) {
   const input = h('input', { type: 'checkbox' });
@@ -890,6 +910,12 @@ function renderSettings() {
       savePrefs();
       renderGroups();
     }),
+    toggleRow(t('All widgets'), prefs.widgets, (on) => {
+      prefs.widgets = on;
+      savePrefs();
+      renderGroups();
+      renderSettings();
+    }),
     ...(data?.groups ?? []).map((g) =>
       toggleRow(g.name, !prefs.hiddenGroups.includes(g.name), (on) => {
         prefs.hiddenGroups = on ? prefs.hiddenGroups.filter((n) => n !== g.name) : [...prefs.hiddenGroups, g.name];
@@ -897,14 +923,10 @@ function renderSettings() {
         renderGroups();
       })
     ),
+    ...hiddenWidgetRows(),
     h('div', { class: 'set-title', text: t('Cards') }),
     toggleRow(t('Container health badges'), prefs.health, (on) => {
       prefs.health = on;
-      savePrefs();
-      renderGroups();
-    }),
-    toggleRow(t('Widget values'), prefs.widgets, (on) => {
-      prefs.widgets = on;
       savePrefs();
       renderGroups();
     }),
@@ -918,24 +940,10 @@ function renderSettings() {
       savePrefs();
       renderGroups();
     }),
-    h('div', { class: 'set-title', text: t('Refresh') }),
-    refreshRow(),
-    h('div', { class: 'set-title', text: t('Appearance') }),
-    selectRow(
-      t('Theme'),
-      prefs.theme,
-      [['auto', t('Automatic')], ...BUILTIN_THEMES.map((b) => [b.id, t(b.name)]), ...(data?.themes ?? []).map((c) => [c.id, c.name])],
-      (v) => {
-        chooseTheme(v);
-        renderGroups();
-      }
-    ),
-    selectRow(t('Language'), prefs.lang, [['auto', t('Automatic')], ...Object.entries(LANGUAGES)], (v) => {
-      prefs.lang = v;
-      savePrefs();
-      render();
-      renderSettings();
-    }),
+    // refresh, theme and language live on the editor's Settings page; here only when the editor can't be opened
+    ...(canOpenEditor()
+      ? [h('p', { class: 'set-note', text: t('Refresh, theme and language: Edit services and settings → Settings.') })]
+      : browserPrefRows()),
     h('p', { class: 'set-note', text: t('Saved in this browser only.') })
   );
   if (data?.editor) {
@@ -978,6 +986,74 @@ function renderSettings() {
     panel.append(out);
   }
 }
+
+/** Widgets hidden one by one with their eye: a row each to show them again. */
+function hiddenWidgetRows() {
+  if (!prefs.widgets || prefs.hiddenWidgets.length === 0) return [];
+  const label = (key) => {
+    const [kind, rest] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+    const name = rest.slice(rest.indexOf('/') + 1);
+    return kind === 'tile' ? t('{name} (widget tile)', { name }) : t('{name} (widget on the card)', { name });
+  };
+  return [
+    h('div', { class: 'set-title', text: t('Hidden widgets') }),
+    ...prefs.hiddenWidgets.map((key) =>
+      toggleRow(label(key), false, () => {
+        prefs.hiddenWidgets = prefs.hiddenWidgets.filter((k) => k !== key);
+        savePrefs();
+        renderGroups();
+        renderSettings();
+      })
+    )
+  ];
+}
+
+/** The editor can be opened by this visitor (else the browser settings stay in the gear menu). */
+const canOpenEditor = () => Boolean(data?.editor) && !(data?.auth?.enabled && !data.auth.loggedIn);
+
+/** Refresh, theme and language: settings of this browser. In the gear menu, or on the editor's Settings page. */
+function browserPrefRows() {
+  return [
+    h('div', { class: 'set-title', text: t('Refresh') }),
+    refreshRow(),
+    h('div', { class: 'set-title', text: t('Appearance') }),
+    selectRow(t('Theme'), prefs.theme, themeChoices(), (v) => {
+      chooseTheme(v);
+      renderGroups();
+    }),
+    selectRow(t('Language'), prefs.lang, [['auto', t('Automatic')], ...Object.entries(LANGUAGES)], (v) => {
+      prefs.lang = v;
+      savePrefs();
+      render();
+      renderSettings();
+    })
+  ];
+}
+const themeChoices = () => [['auto', t('Automatic')], ...BUILTIN_THEMES.map((b) => [b.id, t(b.name)]), ...(data?.themes ?? []).map((c) => [c.id, c.name])];
+
+/** For the editor's Settings page (editor.js): this browser's refresh, theme and language. */
+window.hubPrefs = {
+  get: () => ({ refreshSeconds: prefs.refreshSeconds, theme: prefs.theme, lang: prefs.lang, min: MIN_REFRESH_SECONDS, max: MAX_REFRESH_SECONDS, statsSeconds: data?.statsIntervalSeconds, checkSeconds: data?.checkIntervalSeconds }),
+  themes: themeChoices,
+  languages: () => [['auto', t('Automatic')], ...Object.entries(LANGUAGES)],
+  setRefresh(n) {
+    const v = validRefresh(n);
+    if (v == null) return false;
+    prefs.refreshSeconds = v;
+    savePrefs();
+    scheduleRefresh();
+    return true;
+  },
+  setTheme(id) {
+    chooseTheme(id);
+    renderGroups();
+  },
+  setLang(v) {
+    prefs.lang = v;
+    savePrefs();
+    render();
+  }
+};
 
 /** "Refresh every [10] seconds": how often this page asks the hub for new data. */
 function refreshRow() {

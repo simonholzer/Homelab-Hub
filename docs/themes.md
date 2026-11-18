@@ -4,7 +4,7 @@
 
 ## Picking a theme
 
-Gear menu (top right) → **Appearance** → **Theme**. The choice is kept in that browser, so a phone and a PC can use
+Gear menu (top right) → **Edit services and settings** → **Settings** → **This browser** → **Theme** (without access to the editor: gear menu → **Appearance**). The choice is kept in that browser, so a phone and a PC can use
 different themes.
 
 | Theme | |
@@ -34,7 +34,7 @@ Gear menu → **Edit services and settings** → **Themes**.
 5. The **small preview** next to the names shows a card, the status dots, a bar and a button in the new colors.
    **Try on the page** (the eye) shows the theme on the whole hub, the editor included, until you click it again or
    close the editor.
-6. **Save.** Then pick the theme in the gear menu → Appearance → Theme.
+6. **Save.** Then pick the theme under Settings → This browser → Theme.
 
 Each theme is a box that folds: click its name to open or close it. Closed, it shows its main colors as dots.
 With several themes, *Open all* / *Close all* is at the top. The buttons on a theme: try it, copy it as YAML (to

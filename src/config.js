@@ -316,14 +316,17 @@ export function normalizeConfig(raw, { widgets = {}, env = process.env } = {}) {
     if (localUrl && !isHttpUrl(localUrl)) errors.push(`${label}.local: must be a full http:// or https:// address`);
     const widget = widgetOf(svc, label, localUrl || url);
     const ref = widgetRef(svc.widget, label, []);
+    const def = ref && Object.hasOwn(widgets, ref.use) ? widgets[ref.use] : null;
+    // a click on the tile opens the tile's own address, else the widget's
+    const own = def?.address ? interpolate(def.address, hosts, `${label}.widget address`, []) : '';
     return {
       id,
       tile: true,
-      name: typeof svc.name === 'string' && svc.name.trim() ? svc.name.trim() : widgets[ref?.use]?.name ?? ref?.use ?? 'Widget',
+      name: typeof svc.name === 'string' && svc.name.trim() ? svc.name.trim() : def?.name ?? ref?.use ?? 'Widget',
       url: isHttpUrl(url) ? url : '',
-      localUrl: isHttpUrl(localUrl) ? localUrl : '',
+      localUrl: isHttpUrl(localUrl) ? localUrl : !url && isHttpUrl(own) ? own : '',
       description: '',
-      icon: svc.icon == null ? '' : String(svc.icon),
+      icon: svc.icon == null ? def?.icon ?? '' : String(svc.icon),
       check: null,
       ...(widget ? { widget } : {}),
       containers: [],
@@ -331,17 +334,7 @@ export function normalizeConfig(raw, { widgets = {}, env = process.env } = {}) {
     };
   };
 
-  // the widget row at the top of the page
-  const tiles = [];
-  if (raw.tiles != null && !Array.isArray(raw.tiles)) errors.push('tiles: must be a list of widget tiles');
-  for (const [i, t] of (Array.isArray(raw.tiles) ? raw.tiles : []).entries()) {
-    if (t && typeof t === 'object' && t.type != null && t.type !== 'widget') {
-      errors.push(`tiles[${i}]: only widget tiles go into the widget row (type: widget)`);
-      continue;
-    }
-    const tile = normalizeTile(t, `t${i}`, `tiles[${i}]`);
-    if (tile) tiles.push(tile);
-  }
+  if (raw.tiles != null) errors.push('tiles: widget rows are groups now: a group with  type: widgets  and the tiles under services:');
 
   const groups = [];
   if (raw.groups != null && !Array.isArray(raw.groups)) {
@@ -357,6 +350,9 @@ export function normalizeConfig(raw, { widgets = {}, env = process.env } = {}) {
         errors.push(`${gWhere} (${g.name}): needs a services: list`);
         return;
       }
+      // a widget row: a group that holds widget tiles only
+      if (g.type != null && g.type !== 'widgets') errors.push(`${gWhere}.type: must be widgets (a widget row) or left out`);
+      const row = g.type === 'widgets';
       const services = [];
       g.services.forEach((svc, si) => {
         const where = `${g.name} → services[${si}]`;
@@ -364,7 +360,11 @@ export function normalizeConfig(raw, { widgets = {}, env = process.env } = {}) {
           errors.push(`${where}.type: must be card (the default) or widget`);
           return;
         }
-        if (svc?.type === 'widget') {
+        if (row && svc && typeof svc === 'object' && svc.type != null && svc.type !== 'widget') {
+          errors.push(`${where}: only widget tiles go into a widget row`);
+          return;
+        }
+        if (row || svc?.type === 'widget') {
           const tile = normalizeTile(svc, `g${gi}s${si}`, where);
           if (tile) services.push(tile);
           return;
@@ -412,6 +412,7 @@ export function normalizeConfig(raw, { widgets = {}, env = process.env } = {}) {
         id: `g${gi}`,
         name: g.name.trim(),
         icon: g.icon == null ? '' : String(g.icon),
+        ...(row ? { type: 'widgets' } : {}),
         services
       });
     });
@@ -433,7 +434,6 @@ export function normalizeConfig(raw, { widgets = {}, env = process.env } = {}) {
         network: asList(raw.stats?.network).map(String).filter((n) => /^[\w.:@-]+$/.test(n))
       },
       groups,
-      tiles,
       widgets // the widgets of widgets.yaml, for cards made from Docker labels
     },
     errors: []

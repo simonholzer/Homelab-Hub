@@ -25,7 +25,7 @@ const MAX_ANSWER_BYTES = 2 * 1024 * 1024;
 const MAX_TEXT = 80;
 const USER_AGENT = 'homelab-hub/1.0 (widget)';
 /** Keys of a widget in widgets.yaml (anything else is reported, so a typo doesn't go unnoticed). */
-const WIDGET_KEYS = new Set(['name', 'path', 'url', 'method', 'headers', 'body', 'insecure', 'fields']);
+const WIDGET_KEYS = new Set(['name', 'icon', 'address', 'path', 'url', 'method', 'headers', 'body', 'insecure', 'fields']);
 const FIELD_KEYS = new Set(['label', 'value', 'format', 'suffix']);
 export const ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
 
@@ -149,7 +149,12 @@ export function normalizeWidgets(raw) {
       break;
     }
     for (const k of Object.keys(w)) if (!WIDGET_KEYS.has(k)) errors.push(`${where}.${k}: unknown key; use ${[...WIDGET_KEYS].join(', ')}`);
-    const def = { id, name: w.name == null ? id : String(w.name).slice(0, 60), method: 'GET', headers: {}, insecure: w.insecure === true, fields: [] };
+    const def = { id, name: w.name == null ? id : String(w.name).slice(0, 60), icon: w.icon == null ? '' : String(w.icon), method: 'GET', headers: {}, insecure: w.insecure === true, fields: [] };
+    // address: where the path is asked when the widget is on a tile of its own (a card asks on its own address)
+    if (w.address != null && w.address !== '') {
+      if (typeof w.address !== 'string' || !/^https?:\/\/./i.test(w.address.trim())) errors.push(`${where}.address: must be a full http:// or https:// address, like http://{nas}:2283`);
+      else def.address = w.address.trim();
+    }
     if (w.url != null && w.path != null) errors.push(`${where}: give either path (added to the card's address) or url (a full address), not both`);
     if (w.url != null) {
       if (typeof w.url !== 'string' || !/^https?:\/\//i.test(w.url.trim())) errors.push(`${where}.url: must be a full http:// or https:// address`);
@@ -262,10 +267,11 @@ export function resolveWidget(ref, def, { base, hosts, env, insecure = false }, 
   const missingEnv = new Set();
   const fill = (text, what) => fillPlaceholders(text, { params: ref.params, hosts, env, missingEnv }, `${where}.widget (${what})`, errors);
   let url;
+  if (!base && def.address && !def.url) base = fill(def.address, 'address');
   if (def.url) url = fill(def.url, 'url');
   else {
     if (!base) {
-      errors.push(`${where}.widget: the card needs an address for the widget's path (or give the widget a full url)`);
+      errors.push(`${where}.widget: there is no address to ask "${def.id}" on: give the widget an address (Widgets page) or the card one`);
       return null;
     }
     const path = fill(def.path ?? '', 'path');

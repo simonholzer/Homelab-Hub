@@ -35,12 +35,12 @@ const ICONS = {
  * `sections` are the ids of the boxes on it (to open the editor at one of them).
  */
 const PAGES = [
-  { id: 'services', icon: 'cards', label: 'Services', desc: 'The cards on the page, in their groups. Click a service to edit it; drag the handle to move it, also into another group. Widget tiles move the same way, also into the widget row at the top.', sections: ['cfg-tiles'] },
+  { id: 'services', icon: 'cards', label: 'Services', desc: 'The cards on the page, in their groups. Click a service to edit it; drag the handle to move it, also into another group. Widget rows are groups too: move them like the others, and drag widget tiles into and out of them.', sections: [] },
   { id: 'widgets', icon: 'chart', label: 'Widgets', desc: 'Values from a service\'s own API, shown on its card: photos in Immich, streams in Jellyfin … They are kept in their own file, widgets.yaml, next to the config. A card shows one when you pick it under "Widget" in the card.', sections: ['cfg-widgets'] },
   { id: 'found', icon: 'search', label: 'Found', desc: 'Containers that run in Docker and have no card yet: one click makes a card.', sections: ['cfg-found'] },
   { id: 'machines', icon: 'server', label: 'Machines', desc: 'The stats tiles at the top of the page: this server, and other machines that run the agent.', sections: ['cfg-own', 'cfg-stats', 'cfg-agents-sec'] },
   { id: 'hosts', icon: 'link', label: 'Host shortcuts', desc: 'Short names for addresses, used as {name} in service addresses.', sections: ['cfg-hosts'] },
-  { id: 'settings', icon: 'gear', label: 'Settings', desc: 'How the page looks and how often the hub checks things.', sections: ['cfg-general', 'cfg-timing', 'cfg-home', 'cfg-proxy', 'cfg-docker'] },
+  { id: 'settings', icon: 'gear', label: 'Settings', desc: 'How the page looks and how often the hub checks things.', sections: ['cfg-browser', 'cfg-general', 'cfg-timing', 'cfg-home', 'cfg-proxy', 'cfg-docker'] },
   { id: 'themes', icon: 'palette', label: 'Themes', desc: 'Color themes of your own. Each starts from a built-in theme and changes only the colors you set. After saving, everyone can pick them in the gear menu under Appearance.', sections: ['cfg-themes'] },
   { id: 'backup', icon: 'box', label: 'Import and backup', desc: '', sections: ['cfg-tools'] }
 ];
@@ -361,6 +361,39 @@ function move(arr, i, d, redraw = renderForm) {
 }
 
 // ---- sections ----
+/** Refresh, theme and language of this browser (the page keeps them, see window.hubPrefs in app.js). */
+function browserSection() {
+  const p = window.hubPrefs;
+  if (!p) return null;
+  const now = p.get();
+  const sel = (choices, value, onChange, label) => {
+    const el = h('select', { class: 'cfg-in', 'aria-label': label }, ...choices.map(([v, text]) => h('option', { value: v, rawText: text })));
+    el.value = value;
+    el.addEventListener('change', () => onChange(el.value));
+    return el;
+  };
+  const refresh = h('input', { type: 'number', class: 'cfg-in', min: now.min, max: now.max, step: 1, 'aria-label': 'Refresh every' });
+  refresh.value = now.refreshSeconds;
+  const hint = h('span', { class: 'cfg-h', text: t('The hub measures CPU, memory, network and storage every {stats} s and re-checks services and containers every {checks} s (set below, under Timing).', { stats: now.statsSeconds ?? '?', checks: now.checkSeconds ?? '?' }) });
+  refresh.addEventListener('input', () => {
+    const ok = p.setRefresh(refresh.value);
+    hint.classList.toggle('bad', !ok);
+    if (!ok) hint.textContent = t('Enter a whole number from {min} to {max}.', { min: now.min, max: now.max });
+  });
+  return section(
+    'cfg-browser',
+    'This browser',
+    'How this browser shows the page. Applied at once and kept in this browser only; nothing here is saved to the config.',
+    grid(
+      3,
+      field('Refresh every', withUnit(refresh, 'seconds')),
+      field('Theme', sel(p.themes(), now.theme, (v) => p.setTheme(v), 'Theme')),
+      field('Language', sel(p.languages(), now.lang, (v) => p.setLang(v), 'Language'), 'Automatic: the browser\'s language, or the one set below.')
+    ),
+    hint
+  );
+}
+
 /** The Settings page: one box per topic. */
 function secSettings() {
   const m = st.model;
@@ -386,6 +419,7 @@ function secSettings() {
     if (isObject(d) && Object.keys(d).filter((k) => k !== ID).length === 0) delete m.settings.discovery;
   };
   return [
+    browserSection(),
     section(
       'cfg-general',
       'Page',
@@ -832,10 +866,11 @@ function svcItem(svc, i, list, redraw) {
   const tags = h('span', { class: 'cfg-tags' });
   const tile = isTile(svc);
   const refreshHead = () => {
-    img.src = iconUrl(svc.icon);
+    const wdef = tile ? wm()[widgetUse(svc)] : null;
+    img.src = iconUrl(svc.icon || wdef?.icon);
     if (tile) {
       const w = widgetUse(svc);
-      name.textContent = svc.name || (w && wm()[w]?.name) || w || t('New widget tile');
+      name.textContent = svc.name || wdef?.name || w || t('New widget tile');
       sub.textContent = w ? t('Widget tile · {name}', { name: w }) : t('Widget tile · no widget yet');
       tags.replaceChildren(...[svc.hidden === true ? 'hidden' : '', 'tile'].filter(Boolean).map((x) => h('span', { class: `cfg-tag${x === 'tile' ? ' tile' : ''}`, text: x })));
       return;
@@ -847,7 +882,7 @@ function svcItem(svc, i, list, redraw) {
     );
   };
   refreshHead();
-  const summary = h('button', { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' }, svg('chev', 14), tile && !svc.icon ? svg('chart', 26) : img, h('span', { class: 'cfg-svctext' }, name, sub), tags);
+  const summary = h('button', { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' }, svg('chev', 14), tile && !svc.icon && !wm()[widgetUse(svc)]?.icon ? svg('chart', 26) : img, h('span', { class: 'cfg-svctext' }, name, sub), tags);
   summary.addEventListener('click', () => {
     if (open) st.open.delete(svc);
     else st.open.add(svc);
@@ -898,16 +933,19 @@ function matchesFilter(svc) {
 function secGroup(g, gi, groups) {
   if (!isObject(g)) return null;
   const list = Array.isArray(g.services) ? g.services : [];
+  const row = isRow(g);
+  if (row) for (const x of list) if (isObject(x)) rowItems.add(x);
   const filtering = st.filter.trim() !== '';
   const groupHit = filtering && typeof g.name === 'string' && g.name.toLowerCase().includes(st.filter.trim().toLowerCase());
   // changes inside a group draw only this group again
   const redraw = () => document.getElementById(`cfg-group-${gi}`)?.replaceWith(secGroup(g, gi, groups));
-  const count = h('span', { class: 'cfg-used', text: list.length === 1 ? t('1 service') : t('{n} services', { n: list.length }) });
+  const count = h('span', { class: 'cfg-used', text: row ? (list.length === 1 ? t('1 widget') : t('{n} widgets', { n: list.length })) : list.length === 1 ? t('1 service') : t('{n} services', { n: list.length }) });
   const head = h(
     'div',
     { class: 'cfg-grouphead' },
     grip('group', groups, gi),
-    input(() => g.name, (v) => put(g, 'name', v), { big: true, placeholder: 'Group name', label: 'Group name', after: renderNav }),
+    row ? h('span', { class: 'cfg-rowmark', title: t('Widget row') }, svg('chart', 18)) : null,
+    input(() => g.name, (v) => put(g, 'name', v), { big: true, placeholder: row ? 'Widgets' : 'Group name', label: 'Group name', after: renderNav }),
     count,
     h(
       'span',
@@ -932,31 +970,28 @@ function secGroup(g, gi, groups) {
     const forms = ui.main.querySelectorAll(`#cfg-group-${gi} .cfg-svcform`);
     forms[forms.length - 1]?.querySelector('input')?.focus();
   });
-  const addTile = textBtn('chart', 'Add widget tile', () => {
-    if (!Array.isArray(g.services)) g.services = [];
-    const tile = { type: 'widget', name: '', widget: '' };
-    g.services.push(tile);
-    st.open.add(tile);
-    touched();
-    redraw();
-  });
+  const ownServices = () => (Array.isArray(g.services) ? g.services : (g.services = []));
+  const addTile = st.docs.widgets ? addTilePicker(ownServices, redraw, row ? 'Add a widget…' : 'Add a widget tile…') : null;
   const items = list.map((svc, i) => {
     const el = svcItem(svc, i, list, redraw);
+    if (el && row) el.dropInfo.onlyTiles = true;
     if (el && filtering && !groupHit && !matchesFilter(svc)) el.hidden = true;
     return el;
   });
   const svcs = h('div', { class: 'cfg-svcs' }, ...items);
-  if (list.length === 0) svcs.append(h('p', { class: 'cfg-empty', text: 'No services in this group yet.' }));
+  if (list.length === 0) svcs.append(h('p', { class: 'cfg-empty', text: row ? 'No widgets in this row yet. Add one, or drag a widget tile here.' : 'No services in this group yet.' }));
   // a service dropped on the group (not on another service) goes to its end; an empty group gets its list then
   const ownList = () => (Array.isArray(g.services) ? g.services : (g.services = []));
-  svcs.dropInfo = { kind: 'svc', list: ownList, i: list.length };
+  svcs.dropInfo = { kind: 'svc', list: ownList, i: list.length, onlyTiles: row };
   const sec = h(
     'section',
-    { class: 'cfg-sec cfg-group', id: `cfg-group-${gi}` },
+    { class: `cfg-sec cfg-group${row ? ' cfg-tilerow' : ''}`, id: `cfg-group-${gi}` },
     head,
-    h('div', { class: 'cfg-groupopts' }, check('Container health badges for every card', g.autoContainers === true, (on) => put(g, 'autoContainers', on || undefined), 'Matches Docker containers by the card name; cards without a container get no badge.')),
+    row
+      ? h('p', { class: 'cfg-h', text: 'A widget row: only widget tiles. Widgets are made and changed on the Widgets page; here they are only added and moved.' })
+      : h('div', { class: 'cfg-groupopts' }, check('Container health badges for every card', g.autoContainers === true, (on) => put(g, 'autoContainers', on || undefined), 'Matches Docker containers by the card name; cards without a container get no badge.')),
     svcs,
-    h('div', { class: 'cfg-add' }, add, addTile)
+    h('div', { class: 'cfg-add' }, row ? null : add, addTile)
   );
   if (filtering && !groupHit && !list.some((x) => isObject(x) && matchesFilter(x))) sec.hidden = true;
   sec.dropInfo = { kind: 'group', list: () => groups, i: gi };
@@ -1358,7 +1393,17 @@ function servicesBar() {
     el?.scrollIntoView({ block: 'center' });
     el?.querySelector('input')?.focus();
   });
-  return h('div', { class: 'cfg-toolbar' }, search, fold, addGroup);
+  const addRow = st.docs.widgets
+    ? textBtn('chart', 'Add widget row', () => {
+        if (!Array.isArray(m.groups)) m.groups = [];
+        m.groups.unshift({ name: t('Widgets'), type: 'widgets', services: [] });
+        st.filter = '';
+        touched();
+        renderForm();
+        document.getElementById('cfg-group-0')?.scrollIntoView({ block: 'center' });
+      })
+    : null;
+  return h('div', { class: 'cfg-toolbar' }, search, fold, addGroup, addRow);
 }
 
 function renderForm() {
@@ -1381,9 +1426,10 @@ function renderForm() {
       el?.scrollIntoView({ block: 'center' });
       el?.querySelector('input')?.focus();
     }, 'wide');
+    rowItems = new WeakSet(); // filled again while the groups are drawn
     const sections = groups.map((g, gi) => secGroup(g, gi, groups));
     const nothing = st.filter.trim() && sections.every((x) => !x || x.hidden) ? h('p', { class: 'cfg-empty', text: 'No service matches.' }) : null;
-    body = [servicesBar(), nothing, st.docs.widgets ? secTiles() : null, ...sections, groups.length === 0 ? h('p', { class: 'cfg-empty', text: 'No groups yet. A group is a heading on the page with its cards below it.' }) : null, addGroup];
+    body = [servicesBar(), nothing, ...sections, groups.length === 0 ? h('p', { class: 'cfg-empty', text: 'No groups yet. A group is a heading on the page with its cards below it.' }) : null, addGroup];
   } else if (page.id === 'found') {
     const waiting = newCount('machines');
     const hint = waiting > 0 ? h('div', { class: 'cfg-callout' }, h('span', { text: waiting === 1 ? 'An agent was found on the network.' : 'Agents were found on the network.' }), textBtn('server', 'Show', () => goPage('machines', 'cfg-agents-sec'))) : null;
@@ -2063,9 +2109,10 @@ function secThemes() {
   ];
 }
 
-// ---- widget tiles: a widget on a tile of its own (type: widget in a group, or an entry of tiles:) ----
-let rowItems = new WeakSet(); // the entries of tiles: (they are tiles without saying type: widget)
+// ---- widget tiles: a widget on a tile of its own (type: widget in a group, or any entry of a widget row) ----
+let rowItems = new WeakSet(); // the entries of widget rows (tiles without saying type: widget)
 const isTile = (svc) => isObject(svc) && (svc.type === 'widget' || rowItems.has(svc));
+const isRow = (g) => isObject(g) && g.type === 'widgets';
 let templates = []; // ready-made widgets (src/widget-templates.js), with keySet
 const normWord = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
 /** The ready-made widget that fits a card (its icon, name or containers), like templateFor() on the hub. */
@@ -2073,12 +2120,13 @@ function templateFor(svc) {
   const texts = [svc?.icon, svc?.name, ...asList(svc?.containers)].map(normWord).filter(Boolean);
   return templates.find((tpl) => tpl.match.some((w) => texts.some((x) => x.includes(normWord(w))))) ?? null;
 }
-/** Copies a ready-made widget into widgets.yaml (once) and returns its name there. */
-function useTemplate(tpl) {
+/** Copies a ready-made widget into widgets.yaml (once) and returns its name there. `svc`: the card it is for. */
+function useTemplate(tpl, svc) {
   const all = wm();
   if (isObject(all[tpl.id])) return tpl.id;
   const id = freeWidgetId(tpl.id);
-  all[id] = { name: tpl.name, ...JSON.parse(JSON.stringify(tpl.widget)) };
+  all[id] = { name: tpl.name, icon: tpl.icon ?? tpl.id, ...JSON.parse(JSON.stringify(tpl.widget)) };
+  if (svc) giveAddress(id, svc);
   return id;
 }
 /** What to do after a ready-made widget was taken: its key. */
@@ -2087,67 +2135,39 @@ function templateNote(tpl) {
     ? t('{name} widget added. {env} is already set on the hub. Save to see it.', { name: tpl.name, env: tpl.env })
     : t('{name} widget added. Now put {env} into the hub\'s compose.yaml (under environment:). {help}', { name: tpl.name, env: tpl.env, help: t(tpl.help) });
 }
-/** A new widget tile for a card: the card's widget (or `widgetId`) and address. */
-const tileFor = (svc, widgetId) => ({ type: 'widget', name: svc.name || '', widget: widgetId ?? (isObject(svc.widget) ? unmarked(svc.widget) : svc.widget), ...(svc.local ? { local: svc.local } : {}), ...(svc.url ? { url: svc.url } : {}), ...(svc.icon ? { icon: svc.icon } : {}) });
-
-/** The form of a widget tile: which widget, where it asks, how the tile is headed. */
-function tileForm(svc, refreshHead, ctx) {
-  const addr = (key, placeholder) => {
-    const el = input(() => svc[key], (v) => put(svc, key, v.trim()), { mono: true, placeholder, after: refreshHead });
-    el.dataset.addr = '';
-    return el;
-  };
-  return h(
-    'div',
-    { class: 'cfg-svcform' },
-    widgetField(svc, ctx, refreshHead),
-    fieldset(
-      'Tile',
-      grid(2, field('Heading', input(() => svc.name, (v) => put(svc, 'name', v), { placeholder: widgetUse(svc) ?? 'Immich', after: refreshHead }), 'Empty = the name of the widget.'), iconPicker(svc, refreshHead)),
-      check('Hide this tile', svc.hidden === true, (on) => (put(svc, 'hidden', on || undefined), refreshHead()))
-    ),
-    fieldset(
-      'Addresses',
-      grid(
-        2,
-        field('Home address', addr('local', 'http://{nas}:2283'), 'The widget asks its path here. A click on the tile opens it at home.'),
-        field('Public address', addr('url', 'https://photos.example.com'), 'Used when there is no home address, and opened when you are away. Both are optional.')
-      ),
-      check('Accept a self-signed certificate', svc.insecure === true, (on) => put(svc, 'insecure', on || undefined))
-    )
-  );
+/** A widget with a path and no address of its own gets the card's: a tile has none to give it. */
+function giveAddress(id, svc) {
+  const w = wm()[id];
+  if (isObject(w) && !w.url && !w.address && (svc.local || svc.url)) w.address = svc.local || svc.url;
+}
+/** A new tile with a card's widget (or `widgetId`). The widget gets the card's address when it has none. */
+function tileFor(svc, widgetId) {
+  const widget = widgetId ?? (isObject(svc.widget) ? unmarked(svc.widget) : svc.widget);
+  giveAddress(typeof widget === 'string' ? widget : widget?.use, svc);
+  return { type: 'widget', widget };
 }
 
-/** The widget row at the top of the page (tiles: in the config), shown above the groups. */
-function secTiles() {
-  const m = sm();
-  const list = Array.isArray(m.tiles) ? m.tiles : [];
-  rowItems = new WeakSet(list.filter(isObject));
-  const redraw = () => document.getElementById('cfg-tiles')?.replaceWith(secTiles());
-  const ownList = () => (Array.isArray(m.tiles) ? m.tiles : (m.tiles = []));
-  const items = list.map((svc, i) => {
-    const el = svcItem(svc, i, list, redraw);
-    if (el) el.dropInfo.onlyTiles = true;
-    if (el && st.filter.trim() && !matchesFilter(svc)) el.hidden = true;
-    return el;
-  });
-  const svcs = h('div', { class: 'cfg-svcs' }, ...items);
-  if (list.length === 0) svcs.append(h('p', { class: 'cfg-empty', text: 'No tiles here yet. Add one, or drag a widget tile up here from a group.' }));
-  svcs.dropInfo = { kind: 'svc', list: ownList, i: list.length, onlyTiles: true };
-  const add = textBtn('plus', 'Add widget tile', () => {
-    const tile = { type: 'widget', name: '', widget: '' };
-    ownList().push(tile);
-    st.open.add(tile);
+/** A tile only says which widget it shows; heading, icon and address are the widget's (Widgets page). */
+function tileForm(svc, refreshHead, ctx) {
+  return h('div', { class: 'cfg-svcform' }, widgetField(svc, ctx, refreshHead));
+}
+
+/** "Add a widget…": a list of the widgets; picking one adds a tile with it to `list`. */
+function addTilePicker(list, redraw, label = 'Add a widget tile…') {
+  const all = wm();
+  const names = Object.keys(all).filter((k) => isObject(all[k]));
+  const sel = h('select', { class: 'cfg-in cfg-addtile', 'aria-label': label }, h('option', { value: '', text: label }), ...names.map((n) => h('option', { value: n, rawText: all[n].name && all[n].name !== n ? `${all[n].name} (${n})` : n })));
+  if (names.length === 0) {
+    sel.disabled = true;
+    sel.title = t('Make a widget on the Widgets page first.');
+  }
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    list().push({ type: 'widget', widget: sel.value });
     touched();
     redraw();
   });
-  return h(
-    'section',
-    { class: 'cfg-sec cfg-group cfg-tilerow', id: 'cfg-tiles' },
-    h('div', { class: 'cfg-grouphead' }, svg('chart', 18), h('h3', { text: 'Widget row' }), h('span', { class: 'cfg-used', text: 'At the top of the page, above the groups' })),
-    svcs,
-    h('div', { class: 'cfg-add' }, add)
-  );
+  return sel;
 }
 
 // ---- widgets (widgets.yaml) ----
@@ -2164,11 +2184,12 @@ const WIDGET_FORMATS = [
 /** The widget a card uses: widget: name, or widget: { use: name, ... }. */
 const widgetUse = (svc) => (typeof svc?.widget === 'string' ? svc.widget : isObject(svc?.widget) && typeof svc.widget.use === 'string' ? svc.widget.use : null);
 const allServices = () => [
-  ...(Array.isArray(sm().tiles) ? sm().tiles.filter(isObject) : []),
   ...(Array.isArray(sm().groups) ? sm().groups : []).flatMap((g) => (isObject(g) && Array.isArray(g.services) ? g.services.filter(isObject) : []))
 ];
 /** Every list that holds cards or tiles: the widget row and each group's services. */
-const allLists = () => [Array.isArray(sm().tiles) ? sm().tiles : [], ...(Array.isArray(sm().groups) ? sm().groups : []).map((g) => (isObject(g) && Array.isArray(g.services) ? g.services : []))];
+/** Is this entry a tile in a widget row (where it need not say type: widget)? */
+const inRow = (x) => (Array.isArray(sm().groups) ? sm().groups : []).some((g) => isRow(g) && Array.isArray(g.services) && g.services.includes(x));
+const allLists = () => [...(Array.isArray(sm().groups) ? sm().groups : []).map((g) => (isObject(g) && Array.isArray(g.services) ? g.services : []))];
 const widgetUsers = (id) => allServices().filter((svc) => widgetUse(svc) === id);
 /** A copy without the position markers the hub put in (they only mean something in the file they came from). */
 const unmarked = (v) => (Array.isArray(v) ? v.map(unmarked) : isObject(v) ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== ID).map(([k, x]) => [k, unmarked(x)])) : v);
@@ -2318,7 +2339,7 @@ function fieldRows(w, redraw) {
 function widgetTest(id, w, redraw) {
   const users = widgetUsers(id);
   const others = allServices().filter((svc) => !users.includes(svc) && (svc.local || svc.url));
-  const cards = [...users, ...others];
+  const cards = [...(w.address && !w.url ? [{ name: t('Its address for tiles'), local: w.address }] : []), ...users.filter((x) => !isTile(x)), ...others.filter((x) => !isTile(x))];
   const sel = h('select', { class: 'cfg-in', 'aria-label': 'Card to test with' });
   cards.forEach((svc, i) => sel.append(h('option', { value: String(i), rawText: `${svc.name || t('Unnamed service')} · ${svc.local || svc.url || ''}` })));
   if (st.widgetTest?.id === id && Number.isInteger(st.widgetTest.card)) sel.value = String(st.widgetTest.card);
@@ -2392,7 +2413,7 @@ function widgetBox(id, w) {
   const users = widgetUsers(id);
   const title = h('span', { class: 'cfg-svcname', rawText: w.name || id });
   const sub = h('span', { class: 'cfg-svcsub', rawText: `${id} · ${users.length === 1 ? t('used by 1 card') : t('used by {n} cards', { n: users.length })}` });
-  const summary = h('button', { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' }, svg('chev', 14), svg('chart', 22), h('span', { class: 'cfg-svctext' }, title, sub));
+  const summary = h('button', { type: 'button', class: 'cfg-svcsum', 'aria-expanded': open ? 'true' : 'false' }, svg('chev', 14), w.icon ? h('img', { src: iconUrl(w.icon), alt: '', width: 22, height: 22 }) : svg('chart', 22), h('span', { class: 'cfg-svctext' }, title, sub));
   const redraw = () => {
     const next = widgetBox(id, w);
     el.replaceWith(next);
@@ -2419,13 +2440,13 @@ function widgetBox(id, w) {
   const remove = iconBtn('trash', t('Remove widget {name}', { name: w.name || id }), () => {
     if (users.length > 0 && !confirm(t('{n} cards or tiles use this widget. Remove it from them too? (Tiles that show it are removed.)', { n: users.length }))) return;
     for (const svc of users) delete svc.widget;
-    for (const list of allLists()) for (let i = list.length - 1; i >= 0; i--) if (users.includes(list[i]) && isTile(list[i])) list.splice(i, 1);
+    for (const list of allLists()) for (let i = list.length - 1; i >= 0; i--) if (users.includes(list[i]) && (isTile(list[i]) || inRow(list[i]))) list.splice(i, 1);
     delete wm()[id];
     touched();
     renderForm();
   }, { danger: true });
   const head = h('div', { class: 'cfg-svchead' }, summary, h('span', { class: 'cfg-acts' }, share, duplicate, remove));
-  const el = h('section', { class: `cfg-svc cfg-widget${open ? ' open' : ''}` }, head);
+  const el = h('section', { class: `cfg-svc cfg-widget${open ? ' open' : ''}`, 'data-widget': id }, head);
   if (!open) return el;
 
   const key = h('input', { type: 'text', class: 'cfg-in mono', 'aria-label': 'Name in the file', spellcheck: 'false', autocomplete: 'off' });
@@ -2472,10 +2493,21 @@ function widgetBox(id, w) {
     h(
       'div',
       { class: 'cfg-svcform' },
-      fieldset('Widget', grid(2, field('Name in the editor', nameIn), field('Name in the file', key, 'Cards use the widget by this name. Letters, digits, - and _.'))),
+      fieldset(
+        'Widget',
+        grid(2, field('Name', nameIn, 'Also the heading of its tiles.'), field('Name in the file', key, 'Cards use the widget by this name. Letters, digits, - and _.')),
+        grid(2, iconPicker(w, () => {}))
+      ),
       fieldset(
         'Request',
         grid(2, field('Where', where), field(full ? 'Full address' : 'Path', addr, full ? 'Host shortcuts like {nas} work here.' : 'Added to the card\'s home address (or its public one).')),
+        full
+          ? null
+          : field(
+              'Address for tiles',
+              input(() => w.address, (v) => put(w, 'address', v.trim()), { mono: true, placeholder: 'http://{nas}:2283', label: 'Address for tiles' }),
+              'A card asks the path on its own address; a widget tile asks it here (a click on the tile opens it too).'
+            ),
         grid(2, field('Method', method), check('Accept a self-signed certificate', w.insecure === true, (on) => put(w, 'insecure', on || undefined))),
         body ? field('Body', body, 'Sent with the POST request. {placeholders} work here too.') : null,
         h('div', { class: 'cfg-f' }, h('span', { class: 'cfg-l', text: 'Headers' }), headerRows(w), h('span', { class: 'cfg-h', text: 'Most APIs want a key in a header. Write {env:NAME} and set NAME in the hub\'s compose.yaml: then the key is not in the file. {name} asks each card for a value of its own.' }))
@@ -2603,11 +2635,11 @@ function widgetSuggestions() {
   const fits = [];
   for (const list of allLists()) {
     list.forEach((svc, i) => {
-      if (!isObject(svc) || isTile(svc) || widgetUse(svc)) return;
+      if (!isObject(svc) || isTile(svc) || inRow(svc) || widgetUse(svc)) return;
       const tpl = templateFor(svc);
       if (!tpl) return;
       // already shown on a tile somewhere (the widget row or a group): nothing to suggest
-      const shown = allServices().some((x) => (x.type === 'widget' || (Array.isArray(sm().tiles) && sm().tiles.includes(x))) && widgetUse(x) === tpl.id);
+      const shown = allServices().some((x) => (x.type === 'widget' || inRow(x)) && widgetUse(x) === tpl.id);
       if (!shown) fits.push({ svc, tpl, list, i });
     });
   }
@@ -2626,11 +2658,11 @@ function widgetSuggestions() {
         'span',
         { class: 'cfg-tools' },
         textBtn('plus', 'On the card', () => {
-          svc.widget = useTemplate(tpl);
+          svc.widget = useTemplate(tpl, svc);
           done();
         }),
         textBtn('chart', 'As its own tile', () => {
-          const made = tileFor(svc, useTemplate(tpl));
+          const made = tileFor(svc, useTemplate(tpl, svc));
           list.splice(list.indexOf(svc) + 1, 0, made);
           done();
         })
@@ -2664,7 +2696,7 @@ function widgetField(svc, ctx, refreshHead = () => {}) {
   const all = wm();
   const names = Object.keys(all).filter((k) => isObject(all[k]));
   const current = widgetUse(svc) ?? '';
-  const sel = h('select', { class: 'cfg-in', 'aria-label': 'Widget' }, h('option', { value: '', text: 'No widget' }), ...names.map((n) => h('option', { value: n, rawText: all[n].name && all[n].name !== n ? `${all[n].name} (${n})` : n })));
+  const sel = h('select', { class: 'cfg-in', 'aria-label': 'Widget' }, h('option', { value: '', text: tile ? 'Pick a widget' : 'No widget' }), ...names.map((n) => h('option', { value: n, rawText: all[n].name && all[n].name !== n ? `${all[n].name} (${n})` : n })));
   if (current && !names.includes(current)) sel.append(h('option', { value: current, rawText: t('{name} (not in widgets.yaml)', { name: current }) }));
   sel.value = current;
   const redraw = () => {
@@ -2678,30 +2710,6 @@ function widgetField(svc, ctx, refreshHead = () => {}) {
     touched();
     redraw();
   });
-  // a ready-made widget fits this card: one click
-  const tpl = !current ? templateFor(svc) : null;
-  let suggest = null;
-  if (tpl) {
-    const take = (asTile) => {
-      const id = useTemplate(tpl);
-      if (asTile && ctx) {
-        const made = tileFor(svc, id);
-        ctx.list.splice(ctx.i + 1, 0, made);
-        st.open.add(made);
-      } else svc.widget = id;
-      touched();
-      st.note = templateNote(tpl);
-      if (asTile && ctx) ctx.redraw();
-      else redraw();
-      updateStatus();
-    };
-    suggest = h(
-      'div',
-      { class: 'cfg-callout cfg-suggest' },
-      h('span', {}, svg('chart', 16), ' ', h('span', { text: t('A ready-made {name} widget fits this card.', { name: tpl.name }) })),
-      h('span', { class: 'cfg-tools' }, textBtn('plus', tile ? 'Use it' : 'Show on this card', () => take(false), 'primary'), !tile && ctx ? textBtn('chart', 'As its own tile', () => take(true)) : null)
-    );
-  }
   // a card's widget can move to a tile of its own, right after the card
   const ownTile =
     current && !tile && ctx
@@ -2730,27 +2738,14 @@ function widgetField(svc, ctx, refreshHead = () => {}) {
       )
     )
   );
-  const editBtn = def
-    ? textBtn('chart', 'Edit widget', () => {
-        st.open.add(def);
-        goPage('widgets');
-      })
-    : null;
-  const newBtn = textBtn('plus', 'New widget for this card', () => {
-    const id = addWidget(svc.name || 'my-widget', svc.name || '');
-    if (isObject(svc.widget)) svc.widget.use = id;
-    else svc.widget = id;
-    goPage('widgets');
-  });
   const box = fieldset(
     'Widget',
-    suggest,
     h(
       'div',
       { class: 'cfg-f' },
       h('span', { class: 'cfg-l', text: 'Values from its API' }),
-      h('div', { class: 'cfg-iconrow cfg-wrap' }, sel, editBtn, newBtn, ownTile),
-      h('span', { class: 'cfg-h', text: tile ? 'The tile shows this widget\'s values. Widgets are made on the Widgets page.' : 'Shows a few values from the service\'s own API on the card, e.g. how many photos Immich keeps. Widgets are made on the Widgets page.' })
+      h('div', { class: 'cfg-iconrow cfg-wrap' }, sel, ownTile),
+      h('span', { class: 'cfg-h', text: tile ? 'The tile shows this widget: its heading, icon and address are set on the Widgets page.' : 'Shows a few values from the service\'s own API on the card, e.g. how many photos Immich keeps. Widgets are made and changed on the Widgets page.' })
     ),
     paramInputs.length ? grid(2, ...paramInputs) : null,
     paramInputs.length ? h('span', { class: 'cfg-h', text: 'This widget asks each card for these values.' }) : null
@@ -2803,21 +2798,21 @@ function build() {
 /** Scrolls to a section, a group or one service (which is unfolded). */
 function showTarget(target) {
   if (!target || !st?.model || st.tab !== 'visual') return;
-  const page = target.group != null ? 'services' : pageOf(target.section);
+  const page = target.widget != null ? 'widgets' : target.group != null ? 'services' : pageOf(target.section);
   if (page && page !== st.page) {
     st.page = page;
     st.filter = '';
     renderForm();
   }
   let el = target.section ? document.getElementById(target.section) : null;
-  if (target.tile != null) {
-    const list = Array.isArray(sm().tiles) ? sm().tiles : [];
-    const ti = list.findIndex((x) => isObject(x) && (x.name === target.tile || (!x.name && widgetUse(x) === target.tile)));
-    if (ti >= 0) {
-      st.open.add(list[ti]);
-      renderForm();
-      el = document.querySelectorAll('#cfg-tiles .cfg-svcs > .cfg-svc')[ti] ?? el;
+  if (target.widget != null && st.docs.widgets && isObject(wm()[target.widget])) {
+    st.open.add(wm()[target.widget]);
+    if (st.page !== 'widgets') {
+      st.page = 'widgets';
+      st.filter = '';
     }
+    renderForm();
+    el = [...document.querySelectorAll('.cfg-widget')].find((x) => x.dataset.widget === target.widget) ?? el;
   }
   const groups = Array.isArray(sm().groups) ? sm().groups : [];
   const gi = target.group == null ? -1 : groups.findIndex((g) => isObject(g) && g.name === target.group);

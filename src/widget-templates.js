@@ -112,6 +112,7 @@ export const WIDGET_TEMPLATES = [
   {
     id: 'paperless',
     name: 'Paperless-ngx',
+    icon: 'paperless-ngx',
     match: ['paperless'],
     env: 'PAPERLESS_TOKEN',
     help: 'Paperless-ngx: My profile → API Auth Token.',

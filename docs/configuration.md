@@ -69,7 +69,7 @@ groups:
 | `insecure` | `true` accepts a self-signed certificate on the check (Cockpit, Portainer) |
 | `containers` | Patterns (`*` wildcard) matched against container name, compose project or service name |
 | `widget` | A widget from `widgets.yaml`: values from the service's API on the card, see [widgets.md](widgets.md) |
-| `type` | `widget` makes the entry a widget tile (only a widget's values), see [widgets.md](widgets.md#on-a-card-or-on-a-tile-of-its-own) |
+| `type` | `widget` makes the entry a widget tile (only a widget's values), see [widgets.md](widgets.md#on-a-card-or-on-a-tile-of-its-own). A group with `type: widgets` is a widget row |
 | `hidden` | `true` keeps the entry but hides it |
 | `hosts` | Aliases usable as `{name}` in `url`, `local` and `check` |
 
@@ -135,7 +135,7 @@ The home network, reverse proxy and login settings are in [access.md](access.md)
 
 ## Language
 
-Gear menu → *Appearance* → *Language*: automatic / English / Deutsch, remembered per browser.
+Gear menu → *Edit services and settings* → *Settings* → *This browser* → *Language*: automatic / English / Deutsch, remembered per browser (without access to the editor: in the gear menu under *Appearance*).
 `settings.language: de` in the YAML sets the default for everyone who has not chosen. Texts that come from the server
 (config problems, some check details) are English. Another language is one block in
 [public/i18n.js](../public/i18n.js); see [CONTRIBUTING.md](../CONTRIBUTING.md).

@@ -153,12 +153,14 @@ stats:
       disks:
         - { name: SD card, path: "${disk}", size: ${Math.round(freeGb * 1.7)}G }
 
-# the widget row at the top: tiles that show only a widget's values
-tiles:
-  - { name: Photos, icon: immich, local: "http://{nas}:2283", widget: immich }
-  - { name: Containers, icon: portainer, local: "https://{nas}:9443", widget: portainer }
-
 groups:
+  # a widget row: tiles that show only a widget's values (moved like any group)
+  - name: Widgets
+    type: widgets
+    services:
+      - widget: immich
+      - widget: portainer
+
   - name: NAS
     autoContainers: true
     services:
@@ -168,7 +170,7 @@ groups:
       - { name: n8n, icon: n8n, url: "https://n8n.example.com", local: "http://{nas}:5678", check: "${up}" }
       - { name: Homarr, icon: homarr, url: "https://homarr.example.com", local: "http://{nas}:7575", check: "${up}" }
       - { name: Portainer, icon: portainer, local: "https://{nas}:9443", check: "${up}" }
-      - { type: widget, name: Streams, icon: jellyfin, local: "http://{nas}:8096", widget: jellyfin }
+      - { type: widget, widget: jellyfin }
       - { name: Syncthing, icon: syncthing, local: "http://{nas}:8384", check: "${up}" }
       - { name: Uptime Kuma, icon: uptime-kuma, local: "http://{nas}:3001", check: "${up}" }
   - name: Raspberry Pi
@@ -187,7 +189,8 @@ groups:
 const widgets = path.join(tmp, 'widgets.yaml');
 fs.writeFileSync(widgets, `# Demo widgets, written by scripts/demo.mjs. A real one would use  path: /api/...  on the card's address.
 immich:
-  name: Immich statistics
+  name: Photos
+  icon: immich
   url: http://{demo}/api/server/statistics
   headers:
     x-api-key: "{env:IMMICH_API_KEY}"
@@ -203,7 +206,8 @@ immich:
       format: bytes
 
 jellyfin:
-  name: Jellyfin streams
+  name: Streams
+  icon: jellyfin
   url: http://{demo}/Sessions
   headers:
     x-emby-token: "{env:JELLYFIN_API_KEY}"
@@ -214,7 +218,8 @@ jellyfin:
       value: count(.)
 
 portainer:
-  name: Portainer containers
+  name: Containers
+  icon: portainer
   url: http://{demo}/api/endpoints/1/docker/containers/json
   headers:
     x-api-key: "{env:PORTAINER_API_KEY}"

@@ -273,7 +273,7 @@ test('editor: Test asks the API the way the card would and lists what the answer
     assert.equal(asked.at(-1).url, 'http://10.9.9.9:1/api');
 
     assert.match((await post({ widget: { path: '/api', fields: [] }, service: {} })).error, /fields/);
-    assert.match((await post({ widget: { path: '/api', fields: [{ value: 'x' }] }, service: {} })).error, /needs an address/);
+    assert.match((await post({ widget: { path: '/api', fields: [{ value: 'x' }] }, service: {} })).error, /no address to ask/);
     assert.match((await post({ widget: { path: '/api', headers: { a: '{env:NOPE}' }, fields: [{ value: 'x' }] }, service: { url: 'http://x' } })).error, /Not set on the hub: NOPE/);
   } finally {
     await new Promise((r) => server.close(r));
@@ -319,37 +319,50 @@ test('ready-made widgets: each is valid, and cards find theirs by icon, name or 
   assert.doesNotMatch(JSON.stringify(listed), /"k"/, 'never the key itself');
 });
 
-test('widget tiles: in a group (type: widget) and in the widget row (tiles:)', () => {
-  const { widgets } = normalizeWidgets({ immich: { name: 'Immich stats', path: '/api', fields: [{ value: 'photos' }] } });
+test('widget tiles: in a group (type: widget) and in widget rows (type: widgets)', () => {
+  const { widgets } = normalizeWidgets({ immich: { name: 'Photos', icon: 'immich', address: 'http://{nas}:2283', path: '/api', fields: [{ value: 'photos' }] } });
   const raw = {
     hosts: { nas: '10.0.0.2' },
-    tiles: [{ widget: 'immich', local: 'http://{nas}:2283' }, { name: 'Off', widget: 'immich', hidden: true }],
-    groups: [{ name: 'NAS', services: [{ name: 'Immich', url: 'https://p.example.com' }, { type: 'widget', name: 'Photos', widget: 'immich', url: 'https://p.example.com' }] }]
+    groups: [
+      { name: 'Widgets', type: 'widgets', services: [{ widget: 'immich' }, { widget: 'immich', hidden: true }] },
+      { name: 'NAS', services: [{ name: 'Immich', url: 'https://p.example.com' }, { type: 'widget', widget: 'immich', local: 'http://10.0.0.9' }] }
+    ]
   };
   const { config, errors } = normalizeConfig(raw, { widgets });
   assert.deepEqual(errors, []);
-  assert.equal(config.tiles.length, 1);
-  assert.equal(config.tiles[0].name, 'Immich stats', 'no name: the widget\'s');
-  assert.equal(config.tiles[0].tile, true);
-  assert.equal(config.tiles[0].widget.request.url, 'http://10.0.0.2:2283/api');
-  assert.equal(config.tiles[0].check, null);
-  const tile = config.groups[0].services[1];
-  assert.equal(tile.tile, true);
-  assert.equal(tile.widget.request.url, 'https://p.example.com/api');
+  const row = config.groups[0];
+  assert.equal(row.type, 'widgets');
+  assert.equal(row.services.length, 1, 'hidden tiles are left out');
+  const t0 = row.services[0];
+  assert.equal(t0.tile, true);
+  assert.equal(t0.name, 'Photos', 'heading and icon come from the widget');
+  assert.equal(t0.icon, 'immich');
+  assert.equal(t0.widget.request.url, 'http://10.0.0.2:2283/api', 'a tile asks on the widget\'s address');
+  assert.equal(t0.localUrl, 'http://10.0.0.2:2283', 'and a click opens it');
+  assert.equal(t0.check, null);
+  assert.equal(config.groups[1].services[1].widget.request.url, 'http://10.0.0.9/api', 'a tile\'s own address wins');
 
-  const bad = normalizeConfig({ tiles: [{ name: 'X' }, { type: 'card', name: 'Y', widget: 'immich' }], groups: [{ name: 'G', services: [{ type: 'box', name: 'Z', url: 'http://z' }, { type: 'widget' }] }] }, { widgets });
+  const noAddress = normalizeWidgets({ x: { path: '/api', fields: [{ value: 'n' }] } }).widgets;
+  assert.match(normalizeConfig({ groups: [{ name: 'W', type: 'widgets', services: [{ widget: 'x' }] }] }, { widgets: noAddress }).errors[0], /no address to ask "x"/);
+  assert.match(normalizeWidgets({ x: { address: 'nas', path: '/a', fields: [{ value: 'n' }] } }).errors[0], /x\.address: must be a full http/);
+
+  const bad = normalizeConfig(
+    { tiles: [], groups: [{ name: 'W', type: 'widgets', services: [{ name: 'X' }, { type: 'card', name: 'Y', url: 'http://y' }] }, { name: 'G', type: 'box', services: [{ type: 'box', name: 'Z', url: 'http://z' }] }] },
+    { widgets }
+  );
   const text = bad.errors.join('\n');
-  assert.match(text, /tiles\[0\] \(X\): a widget tile needs a widget/);
-  assert.match(text, /tiles\[1\]: only widget tiles go into the widget row/);
+  assert.match(text, /tiles: widget rows are groups now/);
+  assert.match(text, /W → services\[0\] \(X\): a widget tile needs a widget/);
+  assert.match(text, /W → services\[1\]: only widget tiles go into a widget row/);
+  assert.match(text, /groups\[1\]\.type: must be widgets/);
   assert.match(text, /services\[0\]\.type: must be card/);
-  assert.match(text, /services\[1\]: a widget tile needs a widget/);
 });
 
 test('the monitor asks the widgets of tiles and the page gets them without a status dot', async () => {
   const dir = tmpDir();
   const file = path.join(dir, 'services.yaml');
-  fs.writeFileSync(file, 'tiles:\n  - { name: Top, widget: w, local: "http://10.0.0.2" }\ngroups:\n  - name: G\n    services:\n      - { type: widget, name: In group, widget: w, local: "http://10.0.0.3" }\n');
-  fs.writeFileSync(path.join(dir, 'widgets.yaml'), 'w:\n  path: /api\n  fields: [{ label: N, value: n }]\n');
+  fs.writeFileSync(file, 'groups:\n  - name: Top\n    type: widgets\n    services:\n      - widget: w\n  - name: G\n    services:\n      - { type: widget, widget: w, local: "http://10.0.0.3" }\n');
+  fs.writeFileSync(path.join(dir, 'widgets.yaml'), 'w:\n  name: Numbers\n  address: http://10.0.0.2\n  path: /api\n  fields: [{ label: N, value: n }]\n');
   const asked = [];
   const m = new Monitor({ configPath: file, check: async () => ({ status: 'up' }), statsReader: { read: async () => null }, widget: async (w) => (asked.push(w.request.url), { fields: [{ label: 'N', value: 1 }] }) });
   try {
@@ -357,11 +370,14 @@ test('the monitor asks the widgets of tiles and the page gets them without a sta
     const snap = m.snapshot();
     assert.equal(snap.configError, null);
     assert.deepEqual(asked.sort(), ['http://10.0.0.2/api', 'http://10.0.0.3/api']);
-    assert.equal(snap.tiles[0].name, 'Top');
-    assert.equal(snap.tiles[0].tile, true);
-    assert.equal(snap.tiles[0].status, 'none');
-    assert.equal(snap.tiles[0].widget.fields[0].value, 1);
-    assert.equal(snap.groups[0].services[0].tile, true);
+    const row = snap.groups[0];
+    assert.equal(row.type, 'widgets');
+    assert.equal(row.services[0].name, 'Numbers');
+    assert.equal(row.services[0].tile, true);
+    assert.equal(row.services[0].widgetId, 'w', 'the pencil opens the widget');
+    assert.equal(row.services[0].status, 'none');
+    assert.equal(row.services[0].widget.fields[0].value, 1);
+    assert.equal(snap.groups[1].services[0].tile, true);
     assert.equal(snap.summary.total, 0, 'tiles are not counted as online or offline');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

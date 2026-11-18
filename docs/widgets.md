@@ -20,33 +20,47 @@ you can change. New ones go into [src/widget-templates.js](../src/widget-templat
 A widget can be shown in two ways:
 
 - **On a card:** the values sit under the card's name (`widget:` on the card).
-- **On a widget tile:** a tile with only the values and a small heading, no online dot. Tiles go into any group, next
-  to the cards (`type: widget`), or into the **widget row** at the top of the page, above the groups (`tiles:`).
+- **On a widget tile:** a tile with only the values, headed by the widget's name and icon, no online dot. Tiles go
+  into a **widget row** (a group with `type: widgets`, which holds tiles only), or into any normal group next to the
+  cards (`type: widget`).
 
 ```yaml
-tiles:                                    # the widget row at the top
-  - name: Photos
-    icon: immich
-    local: http://{nas}:2283              # where the widget asks; a click on the tile opens it
-    widget: immich
-
 groups:
+  - name: Widgets                         # a widget row: moved like any other group
+    type: widgets
+    services:
+      - widget: immich
+      - widget: portainer
+
   - name: NAS
     services:
       - name: Jellyfin
         local: http://{nas}:8096
         widget: jellyfin                  # on the card
-      - type: widget                      # a tile in the group
-        name: Streams
-        local: http://{nas}:8096
+      - type: widget                      # a tile in a normal group
         widget: jellyfin
 ```
 
-A tile's `name` is optional (default: the widget's name), and so are `url` and `local` when the widget has a full
-`url:` of its own. In the editor, *Add widget tile* adds one to a group or the widget row, *As its own tile* turns a
-ready-made widget into a tile next to its card, and *Move to its own tile* takes a card's widget off the card onto a
-tile. Tiles are moved with their handle like cards, between groups and into or out of the widget row (only tiles go
-into the widget row).
+A card asks the widget's path on its own address. A tile has no address of its own, so the widget gets one on the
+Widgets page (**Address for tiles**, `address:` in `widgets.yaml`), which a click on the tile also opens. Taking a
+ready-made widget *as its own tile*, or *Move to its own tile* on a card, fills it in from the card.
+
+```yaml
+immich:
+  name: Photos                            # also the heading of its tiles
+  icon: immich
+  address: http://{nas}:2283              # where its tiles ask (and what they open)
+  path: /api/server/statistics
+  ...
+```
+
+Widgets are **made and changed only on the Widgets page**. On the Services page a card or tile only picks one of
+them, and tiles are moved with their handle like cards: between groups, and into or out of widget rows (only tiles
+go into a widget row). *Add widget row* makes a new row; it moves like every group.
+
+**Hiding:** the gear menu's *All widgets* switch hides all of them (values on cards, tiles and widget rows). The small eye
+on a tile, or next to the pin of a card with values, hides just that one; the gear menu lists the hidden ones under
+*Hidden widgets* to show them again. Both are kept in this browser only.
 
 ## Making one in the editor
 
@@ -112,7 +126,9 @@ answers with `images`, `videos` and `total` of that user's own library.
 | `body` | What a `POST` sends (a text, or YAML that is sent as JSON) |
 | `headers` | Headers to send, e.g. an API key |
 | `insecure` | `true` accepts a self-signed certificate |
-| `name` | How the editor lists the widget (default: its key) |
+| `name` | The widget's name, also the heading of its tiles (default: its key) |
+| `icon` | Icon of its tiles (an icon name, like a card's) |
+| `address` | Where its tiles ask the `path` (a card uses its own address) |
 | `fields` | The values on the card (1 to 6): `label`, `value`, `format`, `suffix` |
 
 **`value`** says where the value is in the answer (JSON):

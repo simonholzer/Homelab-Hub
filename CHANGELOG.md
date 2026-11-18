@@ -10,12 +10,16 @@ Every released version, newest first. The Docker image of a version is `ghcr.io/
   on a value puts it on the card), or write them by hand. A card picks one under *Widget*. API keys come from the hub's
   environment (`{env:NAME}`) and never reach the page. Widgets can be copied as YAML and imported, to share them.
   The YAML tab of the editor has a tab per file. See [docs/widgets.md](docs/widgets.md).
-- **Widget tiles.** A widget can also be a tile of its own (only its values): in any group next to the cards, or in
-  the new **widget row** at the top of the page (`tiles:`). Tiles are dragged in the editor like cards.
+- **Widget tiles and widget rows.** A widget can also be a tile of its own (only its values): in a **widget row**
+  (a group with `type: widgets`, moved like any group) or next to the cards in a normal group. Tiles are dragged in
+  the editor like cards. Widgets are made and changed only on the Widgets page; elsewhere they are picked and moved.
 - **Ready-made widgets** for Immich, Jellyfin, Portainer, Sonarr, Radarr, Lidarr, Prowlarr, Jellyseerr/Overseerr,
   Home Assistant, Paperless-ngx, Nextcloud, Syncthing and Proxmox VE. The editor offers one when a card looks like
   the service; one click adds it to the card or as a tile, then only the API key is missing.
-- Gear menu: *Widget values* hides the values on the cards in this browser.
+- **Hiding widgets:** the gear menu's *All widgets* switch hides all of them; a small eye hides one (the gear menu shows it
+  again). Kept in this browser.
+- Refresh, theme and language moved from the gear menu to the editor's Settings page (*This browser*). Without access
+  to the editor they stay in the gear menu.
 
 Updating needs no changes.
 

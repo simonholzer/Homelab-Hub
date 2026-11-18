@@ -474,3 +474,6 @@ body.cfg-dragging, body.cfg-dragging * { cursor: grabbing !important; user-selec
 .cfg-sugrow .cfg-svctext { flex: 1; min-width: 0; }
 .cfg-sugrow img { object-fit: contain; }
 @media (max-width: 720px) { .cfg-sugrow { flex-wrap: wrap; } }
+.cfg-rowmark { display: inline-flex; color: var(--accent); }
+.cfg-add .cfg-addtile { width: auto; min-width: 200px; flex: 0 1 260px; }
+.cfg-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
